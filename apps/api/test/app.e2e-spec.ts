@@ -40,4 +40,10 @@ describe("Health endpoints", () => {
 
     await request(server).get("/api/v1/auth/me").expect(401);
   });
+
+  it("GET /api/v1/organizations rejects anonymous requests", async () => {
+    const server = app.getHttpServer() as unknown as Server;
+
+    await request(server).get("/api/v1/organizations").expect(401);
+  });
 });

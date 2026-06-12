@@ -33,5 +33,18 @@ Realtime Socket.IO namespaces:
 | GET | `/api/v1/auth/me` | Current authenticated user |
 | GET | `/api/v1/auth/google/url` | Google OAuth authorization URL |
 | GET | `/api/v1/auth/google/callback` | Google OAuth callback |
+| GET | `/api/v1/organizations` | Current user's organizations |
+| GET | `/api/v1/organizations/:organizationId` | Organization details |
+| PATCH | `/api/v1/organizations/:organizationId` | Update organization |
+| GET | `/api/v1/organizations/:organizationId/members` | Organization members |
+| PATCH | `/api/v1/organizations/:organizationId/members/:membershipId` | Update member |
+| GET | `/api/v1/organizations/:organizationId/invitations` | Organization invitations |
+| POST | `/api/v1/organizations/:organizationId/invitations` | Create invitation |
+| GET | `/api/v1/organizations/:organizationId/roles` | Organization roles |
+| POST | `/api/v1/organizations/:organizationId/roles` | Create custom role |
+| PATCH | `/api/v1/organizations/:organizationId/roles/:roleId` | Update custom role |
+| DELETE | `/api/v1/organizations/:organizationId/roles/:roleId` | Delete custom role |
+| POST | `/api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId` | Assign role |
+| DELETE | `/api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId` | Revoke role |
 
 Swagger UI is available at `/docs` when the API server is running.

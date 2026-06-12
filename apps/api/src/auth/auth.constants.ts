@@ -16,3 +16,5 @@ export const OWNER_PERMISSIONS = [
   "analytics:read",
   "settings:manage"
 ] as const;
+
+export const AVAILABLE_PERMISSIONS = [...OWNER_PERMISSIONS] as const;

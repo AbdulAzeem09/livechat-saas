@@ -53,3 +53,4 @@ Current implemented backend areas:
 
 - API foundation and health probes
 - Auth registration, login, refresh, logout, Google OAuth endpoints, and `/auth/me`
+- Organization profile, members, invitations, roles, and role assignments

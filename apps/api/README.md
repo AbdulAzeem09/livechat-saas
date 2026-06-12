@@ -15,6 +15,7 @@ The API foundation includes:
 - Swagger documentation at `/docs`
 - Jest unit and e2e test setup
 - JWT auth, refresh-token rotation, Google OAuth endpoints, and role/permission guards
+- Organization profile, members, invitations, and roles APIs
 
 Planned module boundaries:
 
@@ -51,3 +52,16 @@ pnpm --filter @livechat/api typecheck
 - `GET /api/v1/auth/me`
 - `GET /api/v1/auth/google/url`
 - `GET /api/v1/auth/google/callback`
+- `GET /api/v1/organizations`
+- `GET /api/v1/organizations/:organizationId`
+- `PATCH /api/v1/organizations/:organizationId`
+- `GET /api/v1/organizations/:organizationId/members`
+- `PATCH /api/v1/organizations/:organizationId/members/:membershipId`
+- `GET /api/v1/organizations/:organizationId/invitations`
+- `POST /api/v1/organizations/:organizationId/invitations`
+- `GET /api/v1/organizations/:organizationId/roles`
+- `POST /api/v1/organizations/:organizationId/roles`
+- `PATCH /api/v1/organizations/:organizationId/roles/:roleId`
+- `DELETE /api/v1/organizations/:organizationId/roles/:roleId`
+- `POST /api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId`
+- `DELETE /api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId`
