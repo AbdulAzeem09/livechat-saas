@@ -28,3 +28,23 @@ docs/
 ## First Module
 
 This initial module defines the system architecture and database model. The canonical PostgreSQL schema lives in `packages/database/prisma/migrations/000001_initial_schema/migration.sql`, while `packages/database/prisma/schema.prisma` mirrors the data model for application typing.
+
+## Local Development
+
+Install dependencies:
+
+```bash
+pnpm install
+```
+
+Run the API:
+
+```bash
+pnpm --filter @livechat/api dev
+```
+
+Useful local URLs:
+
+- API liveness: `http://localhost:4000/api/v1/health/live`
+- API readiness: `http://localhost:4000/api/v1/health/ready`
+- Swagger docs: `http://localhost:4000/docs`

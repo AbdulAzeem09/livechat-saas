@@ -18,3 +18,13 @@ Realtime Socket.IO namespaces:
 
 - `/agent`: authenticated agent dashboard events
 - `/visitor`: public widget events scoped by widget key and visitor session
+
+## Implemented Foundation Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/health` | Basic API liveness metadata |
+| GET | `/api/v1/health/live` | Liveness probe for process health |
+| GET | `/api/v1/health/ready` | Readiness probe that checks PostgreSQL |
+
+Swagger UI is available at `/docs` when the API server is running.
