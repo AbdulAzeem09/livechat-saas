@@ -48,3 +48,8 @@ Useful local URLs:
 - API liveness: `http://localhost:4000/api/v1/health/live`
 - API readiness: `http://localhost:4000/api/v1/health/ready`
 - Swagger docs: `http://localhost:4000/docs`
+
+Current implemented backend areas:
+
+- API foundation and health probes
+- Auth registration, login, refresh, logout, Google OAuth endpoints, and `/auth/me`

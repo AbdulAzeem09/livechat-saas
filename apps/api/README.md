@@ -14,6 +14,7 @@ The API foundation includes:
 - Health endpoints
 - Swagger documentation at `/docs`
 - Jest unit and e2e test setup
+- JWT auth, refresh-token rotation, Google OAuth endpoints, and role/permission guards
 
 Planned module boundaries:
 
@@ -43,3 +44,10 @@ pnpm --filter @livechat/api typecheck
 - `GET /api/v1/health`
 - `GET /api/v1/health/live`
 - `GET /api/v1/health/ready`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/auth/google/url`
+- `GET /api/v1/auth/google/callback`

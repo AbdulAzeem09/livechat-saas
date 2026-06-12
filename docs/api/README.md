@@ -26,5 +26,12 @@ Realtime Socket.IO namespaces:
 | GET | `/api/v1/health` | Basic API liveness metadata |
 | GET | `/api/v1/health/live` | Liveness probe for process health |
 | GET | `/api/v1/health/ready` | Readiness probe that checks PostgreSQL |
+| POST | `/api/v1/auth/register` | Create first user and organization |
+| POST | `/api/v1/auth/login` | Email/password login |
+| POST | `/api/v1/auth/refresh` | Rotate refresh token |
+| POST | `/api/v1/auth/logout` | Revoke refresh token |
+| GET | `/api/v1/auth/me` | Current authenticated user |
+| GET | `/api/v1/auth/google/url` | Google OAuth authorization URL |
+| GET | `/api/v1/auth/google/callback` | Google OAuth callback |
 
 Swagger UI is available at `/docs` when the API server is running.

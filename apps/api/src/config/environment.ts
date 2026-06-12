@@ -22,12 +22,19 @@ const environmentSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16).default("dev-refresh-secret-change-me"),
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("30d"),
+  JWT_ISSUER: z.string().default("livechat-saas-api"),
+  JWT_AUDIENCE: z.string().default("livechat-saas"),
+  AUTH_REFRESH_COOKIE_NAME: z.string().min(1).default("lc_refresh_token"),
+  AUTH_COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   GOOGLE_CALLBACK_URL: z
     .string()
     .url()
-    .default("http://localhost:4000/auth/google/callback"),
+    .default("http://localhost:4000/api/v1/auth/google/callback"),
   STRIPE_SECRET_KEY: z.string().optional().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(""),
   STRIPE_PUBLISHABLE_KEY: z.string().optional().default(""),

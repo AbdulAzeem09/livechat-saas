@@ -34,4 +34,10 @@ describe("Health endpoints", () => {
       service: "livechat-api"
     });
   });
+
+  it("GET /api/v1/auth/me rejects anonymous requests", async () => {
+    const server = app.getHttpServer() as unknown as Server;
+
+    await request(server).get("/api/v1/auth/me").expect(401);
+  });
 });
