@@ -1,0 +1,878 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationStatus {
+  TRIALING
+  ACTIVE
+  SUSPENDED
+  PAST_DUE
+  CANCELED
+
+  @@map("organization_status")
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DELETED
+
+  @@map("user_status")
+}
+
+enum AuthProvider {
+  PASSWORD
+  GOOGLE
+
+  @@map("auth_provider")
+}
+
+enum RoleKey {
+  OWNER
+  ADMIN
+  MANAGER
+  AGENT
+  VIEWER
+  BILLING
+
+  @@map("role_key")
+}
+
+enum AgentStatus {
+  OFFLINE
+  ONLINE
+  AWAY
+  BUSY
+
+  @@map("agent_status")
+}
+
+enum ConversationStatus {
+  QUEUED
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+  SPAM
+
+  @@map("conversation_status")
+}
+
+enum ConversationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+
+  @@map("conversation_priority")
+}
+
+enum ConversationSource {
+  WIDGET
+  EMAIL
+  API
+  SOCIAL
+  MANUAL
+
+  @@map("conversation_source")
+}
+
+enum ParticipantType {
+  VISITOR
+  AGENT
+  SYSTEM
+
+  @@map("participant_type")
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  SYSTEM
+  EVENT
+  NOTE
+
+  @@map("message_type")
+}
+
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+
+  @@map("message_visibility")
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+
+  @@map("message_status")
+}
+
+enum TransferStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+  CANCELED
+  AUTO_EXPIRED
+
+  @@map("transfer_status")
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+
+  @@map("ticket_status")
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+
+  @@map("ticket_priority")
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  WEBHOOK
+
+  @@map("notification_channel")
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+
+  @@map("notification_status")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+
+  @@map("subscription_status")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+
+  @@map("billing_interval")
+}
+
+model Organization {
+  id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String             @db.VarChar(160)
+  slug         String             @unique @db.VarChar(120)
+  status       OrganizationStatus @default(TRIALING)
+  planCode     String             @default("starter") @map("plan_code") @db.VarChar(64)
+  metadata     Json               @default("{}")
+  trialEndsAt  DateTime?          @map("trial_ends_at") @db.Timestamptz(6)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime?          @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([status])
+  @@map("organizations")
+}
+
+model User {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String     @unique @db.Citext
+  name            String?    @db.VarChar(160)
+  avatarUrl       String?    @map("avatar_url")
+  passwordHash    String?    @map("password_hash")
+  status          UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([status])
+  @@map("users")
+}
+
+model AuthProviderIdentity {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String       @map("user_id") @db.Uuid
+  provider         AuthProvider
+  providerUserId   String       @map("provider_user_id") @db.VarChar(191)
+  providerEmail    String?      @map("provider_email") @db.Citext
+  accessTokenHash  String?      @map("access_token_hash")
+  refreshTokenHash String?      @map("refresh_token_hash")
+  expiresAt        DateTime?    @map("expires_at") @db.Timestamptz(6)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("auth_provider_identities")
+}
+
+model RefreshToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @map("token_hash")
+  ipAddress   String?   @map("ip_address") @db.VarChar(64)
+  userAgent   String?   @map("user_agent")
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model UserOrganization {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  displayName    String?     @map("display_name") @db.VarChar(160)
+  title          String?     @db.VarChar(120)
+  timezone       String      @default("UTC") @db.VarChar(80)
+  status         UserStatus  @default(ACTIVE)
+  agentStatus    AgentStatus @default(OFFLINE) @map("agent_status")
+  maxOpenChats   Int         @default(5) @map("max_open_chats")
+  lastSeenAt     DateTime?   @map("last_seen_at") @db.Timestamptz(6)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, status])
+  @@index([organizationId, agentStatus])
+  @@map("user_organizations")
+}
+
+model Role {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  key            RoleKey?
+  name           String   @db.VarChar(80)
+  description    String?
+  permissions    Json     @default("[]")
+  isSystem       Boolean  @default(false) @map("is_system")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, key])
+  @@map("roles")
+}
+
+model UserRole {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  membershipId   String   @map("membership_id") @db.Uuid
+  roleId         String   @map("role_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([membershipId, roleId])
+  @@index([organizationId])
+  @@map("user_roles")
+}
+
+model Department {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  description    String?
+  routingWeight  Int      @default(100) @map("routing_weight")
+  businessHours  Json     @default("{}") @map("business_hours")
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isDefault])
+  @@map("departments")
+}
+
+model DepartmentAgent {
+  departmentId String   @map("department_id") @db.Uuid
+  membershipId String   @map("membership_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([departmentId, membershipId])
+  @@index([membershipId])
+  @@map("department_agents")
+}
+
+model Invitation {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  email          String     @db.Citext
+  roleId         String?    @map("role_id") @db.Uuid
+  invitedById    String?    @map("invited_by_id") @db.Uuid
+  tokenHash      String     @unique @map("token_hash")
+  status         UserStatus @default(INVITED)
+  expiresAt      DateTime   @map("expires_at") @db.Timestamptz(6)
+  acceptedAt     DateTime?  @map("accepted_at") @db.Timestamptz(6)
+  revokedAt      DateTime?  @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, email])
+  @@map("invitations")
+}
+
+model ChatWidget {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  name              String   @db.VarChar(120)
+  publicKey         String   @unique @map("public_key") @db.VarChar(80)
+  secretHash        String   @map("secret_hash")
+  allowedDomains    String[] @default([]) @map("allowed_domains")
+  theme             Json     @default("{}")
+  routingRules      Json     @default("{}") @map("routing_rules")
+  welcomeMessage    String?  @map("welcome_message")
+  offlineMessage    String?  @map("offline_message")
+  isEnabled         Boolean  @default(true) @map("is_enabled")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, isEnabled])
+  @@map("chat_widgets")
+}
+
+model Contact {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  email          String?   @db.Citext
+  name           String?   @db.VarChar(160)
+  phone          String?   @db.VarChar(40)
+  company        String?   @db.VarChar(160)
+  externalId     String?   @map("external_id") @db.VarChar(191)
+  attributes     Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId, email])
+  @@index([organizationId, company])
+  @@map("contacts")
+}
+
+model Tag {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(80)
+  color          String?  @db.VarChar(24)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String   @map("contact_id") @db.Uuid
+  tagId     String   @map("tag_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
+}
+
+model ContactNote {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  contactId      String   @map("contact_id") @db.Uuid
+  authorId       String?  @map("author_id") @db.Uuid
+  body           String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, contactId])
+  @@map("contact_notes")
+}
+
+model Visitor {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  contactId      String?   @map("contact_id") @db.Uuid
+  externalId     String?   @map("external_id") @db.VarChar(191)
+  name           String?   @db.VarChar(160)
+  email          String?   @db.Citext
+  phone          String?   @db.VarChar(40)
+  firstSeenAt    DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  lastIp         String?   @map("last_ip") @db.VarChar(64)
+  userAgent      String?   @map("user_agent")
+  attributes     Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId, email])
+  @@index([organizationId, lastSeenAt])
+  @@map("visitors")
+}
+
+model VisitorSession {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  visitorId      String    @map("visitor_id") @db.Uuid
+  widgetId       String?   @map("widget_id") @db.Uuid
+  sessionToken   String    @unique @map("session_token")
+  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt        DateTime? @map("ended_at") @db.Timestamptz(6)
+  ipAddress      String?   @map("ip_address") @db.VarChar(64)
+  userAgent      String?   @map("user_agent")
+  country        String?   @db.VarChar(80)
+  region         String?   @db.VarChar(80)
+  city           String?   @db.VarChar(120)
+  referrer       String?
+  landingPage    String?   @map("landing_page")
+  utm            Json      @default("{}")
+  metadata       Json      @default("{}")
+
+  @@index([organizationId, visitorId])
+  @@index([organizationId, startedAt])
+  @@map("visitor_sessions")
+}
+
+model VisitorPageView {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  visitorId      String   @map("visitor_id") @db.Uuid
+  sessionId      String   @map("session_id") @db.Uuid
+  url            String
+  title          String?
+  referrer       String?
+  durationMs     Int?     @map("duration_ms")
+  viewedAt       DateTime @default(now()) @map("viewed_at") @db.Timestamptz(6)
+
+  @@index([organizationId, visitorId, viewedAt])
+  @@index([sessionId])
+  @@map("visitor_page_views")
+}
+
+model VisitorEvent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  visitorId      String   @map("visitor_id") @db.Uuid
+  sessionId      String?  @map("session_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  payload        Json     @default("{}")
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([organizationId, visitorId, occurredAt])
+  @@index([organizationId, name])
+  @@map("visitor_events")
+}
+
+model Conversation {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  visitorId         String?              @map("visitor_id") @db.Uuid
+  contactId         String?              @map("contact_id") @db.Uuid
+  widgetId          String?              @map("widget_id") @db.Uuid
+  departmentId      String?              @map("department_id") @db.Uuid
+  assignedAgentId   String?              @map("assigned_agent_id") @db.Uuid
+  source            ConversationSource   @default(WIDGET)
+  status            ConversationStatus   @default(QUEUED)
+  priority          ConversationPriority @default(NORMAL)
+  subject           String?              @db.VarChar(200)
+  locale            String?              @db.VarChar(20)
+  metadata          Json                 @default("{}")
+  firstResponseAt   DateTime?            @map("first_response_at") @db.Timestamptz(6)
+  lastMessageAt     DateTime?            @map("last_message_at") @db.Timestamptz(6)
+  resolvedAt        DateTime?            @map("resolved_at") @db.Timestamptz(6)
+  closedAt          DateTime?            @map("closed_at") @db.Timestamptz(6)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, priority])
+  @@index([organizationId, assignedAgentId, status])
+  @@index([organizationId, lastMessageAt])
+  @@index([visitorId])
+  @@index([contactId])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  conversationId String          @map("conversation_id") @db.Uuid
+  participantType ParticipantType @map("participant_type")
+  visitorId      String?         @map("visitor_id") @db.Uuid
+  membershipId   String?         @map("membership_id") @db.Uuid
+  displayName    String?         @map("display_name") @db.VarChar(160)
+  joinedAt       DateTime        @default(now()) @map("joined_at") @db.Timestamptz(6)
+  leftAt         DateTime?       @map("left_at") @db.Timestamptz(6)
+  lastReadAt     DateTime?       @map("last_read_at") @db.Timestamptz(6)
+
+  @@index([conversationId])
+  @@index([organizationId, membershipId])
+  @@index([organizationId, visitorId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String            @map("organization_id") @db.Uuid
+  conversationId     String            @map("conversation_id") @db.Uuid
+  senderType         ParticipantType   @map("sender_type")
+  senderVisitorId    String?           @map("sender_visitor_id") @db.Uuid
+  senderMembershipId String?           @map("sender_membership_id") @db.Uuid
+  type               MessageType       @default(TEXT)
+  visibility         MessageVisibility @default(PUBLIC)
+  status             MessageStatus     @default(SENT)
+  body               String?
+  idempotencyKey     String?           @map("idempotency_key") @db.VarChar(120)
+  metadata           Json              @default("{}")
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  editedAt           DateTime?         @map("edited_at") @db.Timestamptz(6)
+  deletedAt          DateTime?         @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([conversationId, idempotencyKey])
+  @@index([organizationId, conversationId, createdAt])
+  @@index([organizationId, senderMembershipId])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  messageId            String   @map("message_id") @db.Uuid
+  uploadedByMembershipId String? @map("uploaded_by_membership_id") @db.Uuid
+  uploadedByVisitorId  String?  @map("uploaded_by_visitor_id") @db.Uuid
+  storageKey           String   @map("storage_key")
+  fileName             String   @map("file_name")
+  mimeType             String   @map("mime_type") @db.VarChar(160)
+  fileSize             BigInt   @map("file_size")
+  checksum             String?  @db.VarChar(128)
+  publicUrl            String?  @map("public_url")
+  metadata             Json     @default("{}")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, messageId])
+  @@map("message_attachments")
+}
+
+model MessageDeliveryReceipt {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId     String    @map("message_id") @db.Uuid
+  participantId String    @map("participant_id") @db.Uuid
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(6)
+  readAt        DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([messageId, participantId])
+  @@map("message_delivery_receipts")
+}
+
+model ConversationAssignment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  agentId        String    @map("agent_id") @db.Uuid
+  assignedById   String?   @map("assigned_by_id") @db.Uuid
+  assignedAt     DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  unassignedAt   DateTime? @map("unassigned_at") @db.Timestamptz(6)
+  reason         String?
+
+  @@index([organizationId, agentId, unassignedAt])
+  @@index([conversationId])
+  @@map("conversation_assignments")
+}
+
+model ChatTransfer {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  conversationId String         @map("conversation_id") @db.Uuid
+  fromAgentId    String?        @map("from_agent_id") @db.Uuid
+  toAgentId      String?        @map("to_agent_id") @db.Uuid
+  toDepartmentId String?        @map("to_department_id") @db.Uuid
+  requestedById  String?        @map("requested_by_id") @db.Uuid
+  status         TransferStatus @default(REQUESTED)
+  reason         String?
+  responseNote   String?        @map("response_note")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  respondedAt    DateTime?      @map("responded_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status])
+  @@index([conversationId])
+  @@map("chat_transfers")
+}
+
+model CannedResponseCategory {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, name])
+  @@map("canned_response_categories")
+}
+
+model CannedResponse {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  categoryId     String?  @map("category_id") @db.Uuid
+  departmentId   String?  @map("department_id") @db.Uuid
+  createdById    String?  @map("created_by_id") @db.Uuid
+  title          String   @db.VarChar(160)
+  shortcut       String   @db.VarChar(80)
+  body           String
+  tags           String[] @default([])
+  isShared       Boolean  @default(true) @map("is_shared")
+  usageCount     Int      @default(0) @map("usage_count")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, shortcut])
+  @@index([organizationId, departmentId])
+  @@map("canned_responses")
+}
+
+model Ticket {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  contactId      String?        @map("contact_id") @db.Uuid
+  visitorId      String?        @map("visitor_id") @db.Uuid
+  conversationId String?        @map("conversation_id") @db.Uuid
+  assigneeId     String?        @map("assignee_id") @db.Uuid
+  createdById    String?        @map("created_by_id") @db.Uuid
+  status         TicketStatus   @default(NEW)
+  priority       TicketPriority @default(NORMAL)
+  subject        String         @db.VarChar(220)
+  description    String?
+  dueAt          DateTime?      @map("due_at") @db.Timestamptz(6)
+  resolvedAt     DateTime?      @map("resolved_at") @db.Timestamptz(6)
+  closedAt       DateTime?      @map("closed_at") @db.Timestamptz(6)
+  metadata       Json           @default("{}")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, priority])
+  @@index([organizationId, assigneeId])
+  @@index([contactId])
+  @@map("tickets")
+}
+
+model TicketComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  ticketId       String   @map("ticket_id") @db.Uuid
+  authorId       String?  @map("author_id") @db.Uuid
+  body           String
+  isInternal     Boolean  @default(false) @map("is_internal")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, ticketId])
+  @@map("ticket_comments")
+}
+
+model TicketEvent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  ticketId       String   @map("ticket_id") @db.Uuid
+  actorId        String?  @map("actor_id") @db.Uuid
+  eventType      String   @map("event_type") @db.VarChar(120)
+  payload        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, ticketId, createdAt])
+  @@map("ticket_events")
+}
+
+model EmailTemplate {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  key            String   @db.VarChar(120)
+  subject        String
+  htmlBody       String   @map("html_body")
+  textBody       String?  @map("text_body")
+  isSystem       Boolean  @default(false) @map("is_system")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, key])
+  @@map("email_templates")
+}
+
+model Notification {
+  id                    String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String              @map("organization_id") @db.Uuid
+  recipientMembershipId String?             @map("recipient_membership_id") @db.Uuid
+  recipientEmail        String?             @map("recipient_email") @db.Citext
+  channel               NotificationChannel
+  status                NotificationStatus  @default(QUEUED)
+  type                  String              @db.VarChar(120)
+  subject               String?
+  body                  String?
+  payload               Json                @default("{}")
+  scheduledAt           DateTime?           @map("scheduled_at") @db.Timestamptz(6)
+  sentAt                DateTime?           @map("sent_at") @db.Timestamptz(6)
+  failedAt              DateTime?           @map("failed_at") @db.Timestamptz(6)
+  error                 String?
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, channel])
+  @@index([recipientMembershipId])
+  @@map("notifications")
+}
+
+model BillingPlan {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String          @unique @db.VarChar(64)
+  name          String          @db.VarChar(120)
+  interval      BillingInterval
+  priceCents    Int             @map("price_cents")
+  currency      String          @default("usd") @db.VarChar(3)
+  stripePriceId String?         @unique @map("stripe_price_id") @db.VarChar(191)
+  features      Json            @default("{}")
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("billing_plans")
+}
+
+model BillingCustomer {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String   @unique @map("organization_id") @db.Uuid
+  stripeCustomerId String   @unique @map("stripe_customer_id") @db.VarChar(191)
+  billingEmail     String?  @map("billing_email") @db.Citext
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("billing_customers")
+}
+
+model BillingSubscription {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId       String             @map("organization_id") @db.Uuid
+  billingCustomerId    String             @map("billing_customer_id") @db.Uuid
+  planId               String?            @map("plan_id") @db.Uuid
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id") @db.VarChar(191)
+  status               SubscriptionStatus
+  currentPeriodStart   DateTime?          @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime?          @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt           DateTime?          @map("canceled_at") @db.Timestamptz(6)
+  metadata             Json               @default("{}")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status])
+  @@map("billing_subscriptions")
+}
+
+model BillingInvoice {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String    @map("organization_id") @db.Uuid
+  subscriptionId   String?   @map("subscription_id") @db.Uuid
+  stripeInvoiceId  String    @unique @map("stripe_invoice_id") @db.VarChar(191)
+  status           String    @db.VarChar(60)
+  currency         String    @default("usd") @db.VarChar(3)
+  amountDueCents   Int       @map("amount_due_cents")
+  amountPaidCents  Int       @default(0) @map("amount_paid_cents")
+  hostedInvoiceUrl String?   @map("hosted_invoice_url")
+  paidAt           DateTime? @map("paid_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt])
+  @@map("billing_invoices")
+}
+
+model AnalyticsDailyMetric {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId           String   @map("organization_id") @db.Uuid
+  departmentId             String?  @map("department_id") @db.Uuid
+  agentId                  String?  @map("agent_id") @db.Uuid
+  date                     DateTime @db.Date
+  conversationsStarted     Int      @default(0) @map("conversations_started")
+  conversationsResolved    Int      @default(0) @map("conversations_resolved")
+  messagesSent             Int      @default(0) @map("messages_sent")
+  missedChats              Int      @default(0) @map("missed_chats")
+  averageFirstResponseSec  Int?     @map("average_first_response_sec")
+  averageResolutionSec     Int?     @map("average_resolution_sec")
+  satisfactionScore        Decimal? @map("satisfaction_score") @db.Decimal(5, 2)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, date])
+  @@index([organizationId, departmentId, date])
+  @@index([organizationId, agentId, date])
+  @@map("analytics_daily_metrics")
+}
+
+model ApiKey {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  name           String    @db.VarChar(120)
+  keyPrefix      String    @map("key_prefix") @db.VarChar(16)
+  keyHash        String    @unique @map("key_hash")
+  scopes         String[]  @default([])
+  lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(6)
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdById    String?   @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+model WebhookEndpoint {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  url            String
+  secretHash     String    @map("secret_hash")
+  events         String[]  @default([])
+  isActive       Boolean   @default(true) @map("is_active")
+  lastSuccessAt  DateTime? @map("last_success_at") @db.Timestamptz(6)
+  lastFailureAt  DateTime? @map("last_failure_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, isActive])
+  @@map("webhook_endpoints")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  actorMemberId  String?  @map("actor_member_id") @db.Uuid
+  action         String   @db.VarChar(160)
+  entityType     String?  @map("entity_type") @db.VarChar(120)
+  entityId       String?  @map("entity_id") @db.Uuid
+  ipAddress      String?  @map("ip_address") @db.VarChar(64)
+  userAgent      String?  @map("user_agent")
+  payload        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt])
+  @@index([actorUserId])
+  @@map("audit_logs")
+}

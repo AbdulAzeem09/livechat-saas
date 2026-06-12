@@ -1,0 +1,22 @@
+{
+  "name": "livechat-saas",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --parallel dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @livechat/database db:generate",
+    "db:migrate": "pnpm --filter @livechat/database db:migrate",
+    "db:deploy": "pnpm --filter @livechat/database db:deploy",
+    "db:studio": "pnpm --filter @livechat/database db:studio",
+    "db:validate": "pnpm --filter @livechat/database db:validate"
+  }
+}
