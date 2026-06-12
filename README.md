@@ -11,7 +11,7 @@ A production-oriented SaaS live chat platform inspired by LiveChat.com. The prod
 5. CRM, tickets, canned responses, file sharing, and notifications
 6. Admin, analytics, billing, tests, Docker, and deployment guide
 
-Expanded LiveChat-style feature scope is tracked in `docs/product/feature-scope.md`.
+Expanded LiveChat-style feature scope and phased roadmap are tracked in `docs/product/feature-scope.md`.
 
 ## Workspace Layout
 
