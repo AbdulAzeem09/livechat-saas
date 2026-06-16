@@ -6,8 +6,9 @@ Initial API groups:
 
 - Auth and Google OAuth
 - Organization, members, roles, and invitations
+- Conversations, messages, assignment, and Socket.IO chat events
 - Visitor tracking and chat widget bootstrap
-- Conversations, messages, transfers, and canned responses
+- Transfers, canned responses, and chat tools
 - Contacts, tags, notes, tickets, and comments
 - File upload signing and attachment metadata
 - Notifications and webhooks
@@ -16,7 +17,7 @@ Initial API groups:
 
 Realtime Socket.IO namespaces:
 
-- `/agent`: authenticated agent dashboard events
+- `/chat`: authenticated agent dashboard events
 - `/visitor`: public widget events scoped by widget key and visitor session
 
 ## Implemented Foundation Endpoints
@@ -46,5 +47,12 @@ Realtime Socket.IO namespaces:
 | DELETE | `/api/v1/organizations/:organizationId/roles/:roleId` | Delete custom role |
 | POST | `/api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId` | Assign role |
 | DELETE | `/api/v1/organizations/:organizationId/members/:membershipId/roles/:roleId` | Revoke role |
+| GET | `/api/v1/organizations/:organizationId/conversations` | List conversations |
+| POST | `/api/v1/organizations/:organizationId/conversations` | Create manual conversation |
+| GET | `/api/v1/organizations/:organizationId/conversations/:conversationId` | Get conversation |
+| PATCH | `/api/v1/organizations/:organizationId/conversations/:conversationId` | Update conversation |
+| POST | `/api/v1/organizations/:organizationId/conversations/:conversationId/assign` | Assign conversation |
+| GET | `/api/v1/organizations/:organizationId/conversations/:conversationId/messages` | List messages |
+| POST | `/api/v1/organizations/:organizationId/conversations/:conversationId/messages` | Send agent message |
 
 Swagger UI is available at `/docs` when the API server is running.
