@@ -1,4 +1,16 @@
-import type { ApiErrorBody, AuthResponse, AuthUser, Organization } from "./types";
+import type {
+  ApiErrorBody,
+  AuthResponse,
+  AuthUser,
+  Conversation,
+  ConversationPriority,
+  ConversationSource,
+  ConversationStatus,
+  Message,
+  MessageType,
+  MessageVisibility,
+  Organization
+} from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
@@ -71,6 +83,86 @@ export function listOrganizations(accessToken: string): Promise<Organization[]> 
   return apiRequest<Organization[]>("/organizations", {
     accessToken
   });
+}
+
+export function listConversations(
+  organizationId: string,
+  accessToken: string,
+  query: {
+    status?: ConversationStatus;
+    assignedToMe?: boolean;
+    limit?: number;
+  } = {}
+): Promise<Conversation[]> {
+  const searchParams = new URLSearchParams();
+
+  if (query.status) {
+    searchParams.set("status", query.status);
+  }
+
+  if (query.assignedToMe !== undefined) {
+    searchParams.set("assignedToMe", String(query.assignedToMe));
+  }
+
+  if (query.limit) {
+    searchParams.set("limit", String(query.limit));
+  }
+
+  const queryString = searchParams.toString();
+
+  return apiRequest<Conversation[]>(
+    `/organizations/${organizationId}/conversations${queryString ? `?${queryString}` : ""}`,
+    { accessToken }
+  );
+}
+
+export function createConversation(
+  organizationId: string,
+  accessToken: string,
+  input: {
+    subject?: string;
+    priority?: ConversationPriority;
+    source?: ConversationSource;
+    initialMessage?: string;
+  }
+): Promise<Conversation> {
+  return apiRequest<Conversation>(`/organizations/${organizationId}/conversations`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function listMessages(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string
+): Promise<Message[]> {
+  return apiRequest<Message[]>(
+    `/organizations/${organizationId}/conversations/${conversationId}/messages`,
+    { accessToken }
+  );
+}
+
+export function sendMessage(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string,
+  input: {
+    body: string;
+    type?: MessageType;
+    visibility?: MessageVisibility;
+    idempotencyKey?: string;
+  }
+): Promise<Message> {
+  return apiRequest<Message>(
+    `/organizations/${organizationId}/conversations/${conversationId}/messages`,
+    {
+      accessToken,
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export function getGoogleAuthUrl(): Promise<{ authUrl: string; state: string }> {
