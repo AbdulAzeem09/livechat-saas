@@ -8,7 +8,8 @@ services:
     region: singapore
     plan: free
     branch: master
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @livechat/database db:generate && pnpm --filter @livechat/api build
+    # --prod=false forces devDependencies (nest/prisma/tsc) to install even though NODE_ENV=production.
+    buildCommand: corepack enable && pnpm install --prod=false --no-frozen-lockfile && pnpm --filter @livechat/database db:generate && pnpm --filter @livechat/api build
     startCommand: node apps/api/dist/main.js
     healthCheckPath: /api/v1/health
     envVars:
