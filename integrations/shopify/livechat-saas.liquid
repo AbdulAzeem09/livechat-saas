@@ -1,0 +1,23 @@
+{% comment %}
+  LiveChat SaaS — Shopify install snippet.
+
+  HOW TO INSTALL:
+  1. In Shopify admin: Online Store → Themes → (…) → Edit code.
+  2. Under "Snippets" click "Add a new snippet", name it: livechat-saas
+  3. Paste this whole file into it and Save.
+  4. Open layout/theme.liquid and add this line right before </body>:
+        {% render 'livechat-saas' %}
+  5. Replace the widget_key below with your key (Dashboard → Settings → Install),
+     and api_base with your LiveChat SaaS API URL.
+
+  Bonus: to track a sale on the order-status page, add after the widget:
+        <script>window.LiveChatSaaS && LiveChatSaaS.trackSale({{ checkout.total_price | divided_by: 100.0 }}, "{{ shop.currency }}");</script>
+{% endcomment %}
+
+{%- assign widget_key = 'lcw_1h37gwUNN9VebHHv30ik8ITi' -%}
+{%- assign api_base = 'http://localhost:4000/api/v1' -%}
+
+<script
+  async
+  src="{{ api_base }}/widget.js"
+  data-widget-key="{{ widget_key }}"></script>

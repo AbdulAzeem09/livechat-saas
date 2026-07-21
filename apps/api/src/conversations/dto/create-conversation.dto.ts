@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { ConversationPriority, ConversationSource } from "@prisma/client";
 import {
+  IsBoolean,
   IsEnum,
   IsObject,
   IsOptional,
@@ -73,4 +74,11 @@ export class CreateConversationDto {
   @IsOptional()
   @MinLength(1)
   initialMessage?: string;
+
+  @ApiPropertyOptional({
+    description: "If true, the initial message is attributed to a simulated VISITOR (test chat)."
+  })
+  @IsBoolean()
+  @IsOptional()
+  simulateVisitor?: boolean;
 }

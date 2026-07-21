@@ -18,5 +18,8 @@
     "db:deploy": "pnpm --filter @livechat/database db:deploy",
     "db:studio": "pnpm --filter @livechat/database db:studio",
     "db:validate": "pnpm --filter @livechat/database db:validate"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.1.0"
   }
 }

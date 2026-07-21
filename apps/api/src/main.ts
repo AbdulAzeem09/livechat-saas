@@ -6,6 +6,20 @@ import { AppModule } from "./app.module";
 import { configureApp } from "./app.setup";
 import { setupSwagger } from "./docs/swagger";
 
+// Keep the API alive if a stray background promise (e.g. a transient DB pooler
+// hiccup or a webhook dispatch) rejects — log it instead of crashing the process.
+const processLogger = new Logger("Process");
+
+process.on("unhandledRejection", (reason) => {
+  processLogger.error(
+    `Unhandled promise rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`
+  );
+});
+
+process.on("uncaughtException", (error) => {
+  processLogger.error(`Uncaught exception: ${error.stack ?? error.message}`);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true

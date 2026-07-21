@@ -120,19 +120,30 @@ export class AuthController {
   }
 
   @Get("google/callback")
-  @ApiOperation({ summary: "Handle Google OAuth callback" })
-  @ApiOkResponse({ type: AuthResponseDto })
+  @ApiOperation({ summary: "Handle Google OAuth callback (redirects back to the app)" })
   async handleGoogleCallback(
     @Query() query: GoogleCallbackDto,
     @Req() request: Request,
-    @Res({ passthrough: true }) response: Response
-  ): Promise<AuthResponseDto> {
-    const result = await this.authService.handleGoogleCallback(
-      query.code,
-      this.getRequestMetadata(request)
-    );
-    this.setRefreshCookie(response, result);
-    return result;
+    @Res() response: Response
+  ): Promise<void> {
+    const appUrl = this.config.getOrThrow<string>("APP_URL").replace(/\/$/, "");
+
+    try {
+      const result = await this.authService.handleGoogleCallback(
+        query.code,
+        this.getRequestMetadata(request)
+      );
+      this.setRefreshCookie(response, result);
+      // Tokens ride in the URL fragment so they never hit the server logs.
+      const fragment = new URLSearchParams({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken
+      });
+      response.redirect(`${appUrl}/auth/callback#${fragment.toString()}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google sign-in failed";
+      response.redirect(`${appUrl}/login?error=${encodeURIComponent(message)}`);
+    }
   }
 
   private getRequestMetadata(request: Request) {

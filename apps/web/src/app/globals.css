@@ -43,3 +43,127 @@ input:focus-visible {
 ::selection {
   background: rgba(20, 184, 166, 0.22);
 }
+
+/* --- Motion / polish (LiveChat-like smoothness) --- */
+@keyframes lc-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lc-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lc-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes lc-pop {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.lc-fade-in {
+  animation: lc-fade-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-msg-in {
+  animation: lc-msg-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-pop {
+  animation: lc-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.lc-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.13) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: lc-shimmer 1.4s ease-in-out infinite;
+}
+
+.lc-shimmer-light {
+  background: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0.05) 25%,
+    rgba(15, 23, 42, 0.11) 50%,
+    rgba(15, 23, 42, 0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: lc-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Smooth interactive feedback everywhere */
+button,
+a,
+[role="button"] {
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.12s ease;
+}
+
+button:active,
+[role="button"]:active {
+  transform: scale(0.97);
+}
+
+/* Nicer scrollbars in the dark app */
+.lc-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.lc-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+.lc-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-fade-in,
+  .lc-msg-in,
+  .lc-pop,
+  .lc-shimmer,
+  .lc-shimmer-light {
+    animation: none;
+  }
+  button:active,
+  [role="button"]:active {
+    transform: none;
+  }
+}

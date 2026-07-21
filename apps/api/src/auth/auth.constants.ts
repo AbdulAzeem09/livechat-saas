@@ -17,4 +17,14 @@ export const OWNER_PERMISSIONS = [
   "settings:manage"
 ] as const;
 
+export const AGENT_PERMISSIONS = [
+  "organization:read",
+  "chat:read",
+  "chat:write",
+  "chat:transfer",
+  "contacts:manage",
+  "tickets:manage",
+  "analytics:read"
+] as const;
+
 export const AVAILABLE_PERMISSIONS = [...OWNER_PERMISSIONS] as const;

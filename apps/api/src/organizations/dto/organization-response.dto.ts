@@ -60,6 +60,9 @@ export class OrganizationDto {
   @ApiProperty()
   updatedAt!: Date;
 
+  @ApiProperty({ type: Object, description: "Company details & custom fields" })
+  metadata!: Record<string, unknown>;
+
   @ApiPropertyOptional({ type: OrganizationMembershipDto })
   membership?: OrganizationMembershipDto | undefined;
 }
@@ -132,4 +135,10 @@ export class InvitationDto {
 
   @ApiProperty()
   createdAt!: Date;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: "Raw invite token — returned ONCE on creation so the link can be shared"
+  })
+  token?: string | null;
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,16 +7,21 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards
+  UploadedFile,
+  UseGuards,
+  UseInterceptors
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags
 } from "@nestjs/swagger";
+import type { UploadedFileLike } from "../storage/file-storage.service";
 import { CurrentOrganization } from "../organizations/decorators/current-organization.decorator";
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
@@ -29,6 +35,7 @@ import { ListConversationsQuery } from "./dto/list-conversations.query";
 import { ListMessagesQuery } from "./dto/list-messages.query";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { UpdateConversationDto } from "./dto/update-conversation.dto";
+import { UpdateTagsDto } from "./dto/update-tags.dto";
 import { ConversationsService } from "./conversations.service";
 
 @ApiTags("Conversations")
@@ -109,6 +116,41 @@ export class ConversationsController {
       context,
       dto
     );
+  }
+
+  @Patch(":conversationId/tags")
+  @Permissions("chat:write")
+  @ApiOperation({ summary: "Set the tags on a conversation" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  @ApiOkResponse({ type: ConversationDto })
+  updateTags(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string,
+    @Body() dto: UpdateTagsDto
+  ): Promise<ConversationDto> {
+    return this.conversationsService.updateTags(organizationId, conversationId, dto.tags);
+  }
+
+  @Post(":conversationId/attachments")
+  @Permissions("chat:write")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiOperation({ summary: "Upload a file attachment as a message" })
+  @ApiConsumes("multipart/form-data")
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  @ApiCreatedResponse({ type: MessageDto })
+  uploadAttachment(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string,
+    @CurrentOrganization() context: OrganizationRequestContext,
+    @UploadedFile() file: UploadedFileLike | undefined
+  ): Promise<MessageDto> {
+    if (!file) {
+      throw new BadRequestException("No file uploaded");
+    }
+
+    return this.conversationsService.createFileMessage(organizationId, conversationId, context, file);
   }
 
   @Get(":conversationId/messages")

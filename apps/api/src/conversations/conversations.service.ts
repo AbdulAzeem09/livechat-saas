@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   BadRequestException,
   Injectable,
@@ -18,6 +19,7 @@ import {
 } from "@prisma/client";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
 import { PrismaService } from "../prisma/prisma.service";
+import { FileStorageService, type UploadedFileLike } from "../storage/file-storage.service";
 import type { AssignConversationDto } from "./dto/assign-conversation.dto";
 import type { ConversationDto, MessageDto } from "./dto/conversation-response.dto";
 import type { CreateConversationDto } from "./dto/create-conversation.dto";
@@ -31,7 +33,8 @@ import { ConversationsGateway } from "./conversations.gateway";
 export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: ConversationsGateway
+    private readonly gateway: ConversationsGateway,
+    private readonly fileStorage: FileStorageService
   ) {}
 
   async listConversations(
@@ -82,10 +85,25 @@ export class ConversationsService {
     await this.ensureOptionalReferences(organizationId, dto);
 
     const result = await this.prisma.$transaction(async (transaction) => {
+      // Test chat: attribute the first message to a real (simulated) visitor so the
+      // transcript shows it as the customer, not the agent.
+      let visitorId = dto.visitorId ?? null;
+      if (dto.simulateVisitor && !visitorId) {
+        const visitor = await transaction.visitor.create({
+          data: {
+            organizationId,
+            externalId: `test:${randomBytes(12).toString("hex")}`,
+            name: "Test visitor",
+            lastSeenAt: new Date()
+          }
+        });
+        visitorId = visitor.id;
+      }
+
       let conversation = await transaction.conversation.create({
         data: {
           organizationId,
-          ...(dto.visitorId ? { visitorId: dto.visitorId } : {}),
+          ...(visitorId ? { visitorId } : {}),
           ...(dto.contactId ? { contactId: dto.contactId } : {}),
           ...(dto.widgetId ? { widgetId: dto.widgetId } : {}),
           ...(dto.departmentId ? { departmentId: dto.departmentId } : {}),
@@ -108,13 +126,13 @@ export class ConversationsService {
         }
       });
 
-      if (dto.visitorId) {
+      if (visitorId) {
         await transaction.conversationParticipant.create({
           data: {
             organizationId,
             conversationId: conversation.id,
             participantType: ParticipantType.VISITOR,
-            visitorId: dto.visitorId
+            visitorId
           }
         });
       }
@@ -122,12 +140,15 @@ export class ConversationsService {
       let latestMessage: Message | null = null;
 
       if (initialMessage) {
+        const fromVisitor = Boolean(dto.simulateVisitor && visitorId);
         latestMessage = await transaction.message.create({
           data: {
             organizationId,
             conversationId: conversation.id,
-            senderType: ParticipantType.AGENT,
-            senderMembershipId: context.membershipId,
+            senderType: fromVisitor ? ParticipantType.VISITOR : ParticipantType.AGENT,
+            ...(fromVisitor
+              ? { senderVisitorId: visitorId as string }
+              : { senderMembershipId: context.membershipId }),
             type: MessageType.TEXT,
             visibility: MessageVisibility.PUBLIC,
             status: MessageStatus.SENT,
@@ -137,7 +158,8 @@ export class ConversationsService {
         conversation = await transaction.conversation.update({
           where: { id: conversation.id },
           data: {
-            firstResponseAt: latestMessage.createdAt,
+            // A visitor's opening message isn't an agent "first response".
+            ...(fromVisitor ? {} : { firstResponseAt: latestMessage.createdAt }),
             lastMessageAt: latestMessage.createdAt
           }
         });
@@ -175,6 +197,32 @@ export class ConversationsService {
         ...(dto.subject !== undefined ? { subject: dto.subject } : {}),
         ...(dto.metadata !== undefined ? { metadata: this.toJsonInput(dto.metadata) } : {})
       }
+    });
+    const response = this.mapConversation(conversation);
+
+    this.gateway.emitConversationUpdated(response);
+    return response;
+  }
+
+  async updateTags(
+    organizationId: string,
+    conversationId: string,
+    tags: string[]
+  ): Promise<ConversationDto> {
+    const existing = await this.getConversationOrThrow(organizationId, conversationId);
+
+    const normalizedTags = Array.from(
+      new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))
+    ).slice(0, 20);
+
+    const baseMetadata =
+      existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    const conversation = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { metadata: this.toJsonInput({ ...baseMetadata, tags: normalizedTags }) }
     });
     const response = this.mapConversation(conversation);
 
@@ -336,6 +384,72 @@ export class ConversationsService {
 
       return { message, conversation: updatedConversation };
     });
+    const messageResponse = this.mapMessage(result.message);
+
+    this.gateway.emitMessageCreated(messageResponse);
+    this.gateway.emitConversationUpdated(this.mapConversation(result.conversation, result.message));
+    return messageResponse;
+  }
+
+  async createFileMessage(
+    organizationId: string,
+    conversationId: string,
+    context: OrganizationRequestContext,
+    file: UploadedFileLike
+  ): Promise<MessageDto> {
+    const conversation = await this.getConversationOrThrow(organizationId, conversationId);
+    const stored = await this.fileStorage.save(organizationId, file);
+
+    const attachmentMetadata = {
+      attachment: {
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        url: stored.publicUrl
+      }
+    };
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const message = await transaction.message.create({
+        data: {
+          organizationId,
+          conversationId,
+          senderType: ParticipantType.AGENT,
+          senderMembershipId: context.membershipId,
+          type: MessageType.FILE,
+          visibility: MessageVisibility.PUBLIC,
+          status: MessageStatus.SENT,
+          body: file.originalname,
+          metadata: this.toJsonInput(attachmentMetadata)
+        }
+      });
+
+      await transaction.messageAttachment.create({
+        data: {
+          organizationId,
+          messageId: message.id,
+          uploadedByMembershipId: context.membershipId,
+          storageKey: stored.storageKey,
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          fileSize: BigInt(file.size),
+          publicUrl: stored.publicUrl
+        }
+      });
+
+      const updatedConversation = await transaction.conversation.update({
+        where: { id: conversationId },
+        data: {
+          lastMessageAt: message.createdAt,
+          ...(conversation.firstResponseAt === null
+            ? { firstResponseAt: message.createdAt }
+            : {})
+        }
+      });
+
+      return { message, conversation: updatedConversation };
+    });
+
     const messageResponse = this.mapMessage(result.message);
 
     this.gateway.emitMessageCreated(messageResponse);

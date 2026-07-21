@@ -758,12 +758,14 @@ model BillingPlan {
 }
 
 model BillingCustomer {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId   String   @unique @map("organization_id") @db.Uuid
-  stripeCustomerId String   @unique @map("stripe_customer_id") @db.VarChar(191)
-  billingEmail     String?  @map("billing_email") @db.Citext
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String   @unique @map("organization_id") @db.Uuid
+  provider           String   @default("authorizenet") @db.VarChar(40)
+  stripeCustomerId   String?  @unique @map("stripe_customer_id") @db.VarChar(191)
+  providerCustomerId String?  @unique @map("provider_customer_id") @db.VarChar(191)
+  billingEmail       String?  @map("billing_email") @db.Citext
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("billing_customers")
 }
@@ -773,7 +775,9 @@ model BillingSubscription {
   organizationId       String             @map("organization_id") @db.Uuid
   billingCustomerId    String             @map("billing_customer_id") @db.Uuid
   planId               String?            @map("plan_id") @db.Uuid
-  stripeSubscriptionId String             @unique @map("stripe_subscription_id") @db.VarChar(191)
+  provider             String             @default("authorizenet") @db.VarChar(40)
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id") @db.VarChar(191)
+  providerSubscriptionId String?          @unique @map("provider_subscription_id") @db.VarChar(191)
   status               SubscriptionStatus
   currentPeriodStart   DateTime?          @map("current_period_start") @db.Timestamptz(6)
   currentPeriodEnd     DateTime?          @map("current_period_end") @db.Timestamptz(6)
@@ -790,9 +794,10 @@ model BillingSubscription {
 model BillingInvoice {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId   String    @map("organization_id") @db.Uuid
-  subscriptionId   String?   @map("subscription_id") @db.Uuid
-  stripeInvoiceId  String    @unique @map("stripe_invoice_id") @db.VarChar(191)
-  status           String    @db.VarChar(60)
+  subscriptionId    String?   @map("subscription_id") @db.Uuid
+  stripeInvoiceId   String?   @unique @map("stripe_invoice_id") @db.VarChar(191)
+  providerInvoiceId String?   @unique @map("provider_invoice_id") @db.VarChar(191)
+  status            String    @db.VarChar(60)
   currency         String    @default("usd") @db.VarChar(3)
   amountDueCents   Int       @map("amount_due_cents")
   amountPaidCents  Int       @default(0) @map("amount_paid_cents")
@@ -802,6 +807,85 @@ model BillingInvoice {
 
   @@index([organizationId, createdAt])
   @@map("billing_invoices")
+}
+
+model AutomationRule {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  enabled        Boolean  @default(true)
+  isGreeting     Boolean  @default(false) @map("is_greeting")
+  keywords       String[] @default([])
+  replyMessage   String   @map("reply_message")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, enabled])
+  @@map("automation_rules")
+}
+
+model Campaign {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(160)
+  type           String   @default("recurring") @db.VarChar(20)
+  triggerType    String   @default("page_visit") @map("trigger_type") @db.VarChar(40)
+  triggerValue   String   @default("") @map("trigger_value") @db.VarChar(500)
+  message        String   @default("")
+  enabled        Boolean  @default(true)
+  displayedCount Int      @default(0) @map("displayed_count")
+  chatsCount     Int      @default(0) @map("chats_count")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, enabled])
+  @@map("campaigns")
+}
+
+model Goal {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(160)
+  type           String   @default("url") @db.VarChar(20)
+  target         String   @default("") @db.VarChar(500)
+  valueCents     Int      @default(0) @map("value_cents")
+  enabled        Boolean  @default(true)
+  completedCount Int      @default(0) @map("completed_count")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, enabled])
+  @@map("goals")
+}
+
+model Sale {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  visitorId      String?  @map("visitor_id") @db.Uuid
+  amountCents    Int      @map("amount_cents")
+  currency       String   @default("usd") @db.VarChar(3)
+  reference      String?  @db.VarChar(191)
+  source         String   @default("widget") @db.VarChar(40)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt])
+  @@map("sales")
+}
+
+model KnowledgeArticle {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  title          String   @db.VarChar(240)
+  content        String   @default("")
+  category       String   @default("General") @db.VarChar(120)
+  published      Boolean  @default(true)
+  views          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, published])
+  @@map("knowledge_articles")
 }
 
 model AnalyticsDailyMetric {

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Building2 } from "lucide-react";
-import { register } from "@/lib/api";
+import { ArrowRight, Building2, KeyRound } from "lucide-react";
+import { getGoogleAuthUrl, register } from "@/lib/api";
 import { slugify } from "@/lib/format";
 import { saveSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,23 @@ export function RegisterForm() {
   const [organizationSlug, setOrganizationSlug] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const computedSlug = useMemo(
     () => organizationSlug || slugify(organizationName),
     [organizationName, organizationSlug]
   );
+
+  async function handleGoogle() {
+    setError("");
+    setIsGoogleLoading(true);
+    try {
+      const { authUrl } = await getGoogleAuthUrl();
+      window.location.href = authUrl;
+    } catch {
+      setError("Google sign-up isn't configured yet. Add GOOGLE_CLIENT_ID/SECRET in the API .env.");
+      setIsGoogleLoading(false);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,6 +128,21 @@ export function RegisterForm() {
         variant="secondary"
       >
         Fill workspace
+      </Button>
+      <div className="relative my-1 flex items-center gap-3">
+        <span className="h-px flex-1 bg-white/10" />
+        <span className="text-xs font-medium text-white/40">or</span>
+        <span className="h-px flex-1 bg-white/10" />
+      </div>
+      <Button
+        className="w-full"
+        icon={<KeyRound className="h-4 w-4" aria-hidden />}
+        isLoading={isGoogleLoading}
+        onClick={() => void handleGoogle()}
+        type="button"
+        variant="secondary"
+      >
+        Continue with Google
       </Button>
     </form>
   );

@@ -1,4 +1,4 @@
-import { Logger } from "@nestjs/common";
+import { HttpException, Logger } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -17,6 +17,14 @@ import type { ConversationDto, MessageDto } from "./dto/conversation-response.dt
 interface ChatSocketData {
   user?: AuthUser;
   organizationContext?: OrganizationRequestContext;
+  visitorContext?: VisitorSocketContext;
+}
+
+interface VisitorSocketContext {
+  organizationId: string;
+  widgetId: string;
+  visitorId: string;
+  sessionToken: string;
 }
 
 interface ConversationRoomPayload {
@@ -25,6 +33,7 @@ interface ConversationRoomPayload {
 
 interface TypingPayload extends ConversationRoomPayload {
   isTyping?: boolean;
+  preview?: string;
 }
 
 @WebSocketGateway({
@@ -51,7 +60,8 @@ export class ConversationsGateway {
       const token = this.extractToken(client);
 
       if (!token) {
-        throw new Error("Missing bearer token");
+        await this.handleVisitorConnection(client);
+        return;
       }
 
       const user = await this.authService.validateAccessToken(token);
@@ -72,8 +82,17 @@ export class ConversationsGateway {
         membershipId: context.membershipId
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Socket authentication failed";
-
+      // Only surface our own (safe) auth messages. Never leak internal errors
+      // (e.g. a Prisma "Can't reach database server …" with a file path) to the client.
+      const isKnown = error instanceof HttpException;
+      const message = isKnown
+        ? (error as HttpException).message
+        : "Couldn't connect to chat. Retrying…";
+      if (!isKnown) {
+        this.logger.error(
+          `Socket connection error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+        );
+      }
       client.emit("chat.error", { message });
       client.disconnect(true);
     }
@@ -86,6 +105,8 @@ export class ConversationsGateway {
       this.logger.debug(
         `Socket disconnected for membership ${data.organizationContext.membershipId}`
       );
+    } else if (data.visitorContext) {
+      this.logger.debug(`Visitor socket disconnected for visitor ${data.visitorContext.visitorId}`);
     }
   }
 
@@ -94,10 +115,18 @@ export class ConversationsGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: ConversationRoomPayload
   ): Promise<{ ok: true; conversationId: string }> {
-    const context = this.getAuthorizedContext(client);
+    const data = this.getClientData(client);
     const conversationId = this.requireConversationId(payload);
 
-    await this.ensureConversationAccess(context.organizationId, conversationId);
+    if (data.organizationContext) {
+      this.accessService.assertPermissions(data.organizationContext, ["chat:read"]);
+      await this.ensureConversationAccess(data.organizationContext.organizationId, conversationId);
+    } else if (data.visitorContext) {
+      await this.ensureVisitorConversationAccess(data.visitorContext, conversationId);
+    } else {
+      throw new Error("Socket is not authenticated");
+    }
+
     await client.join(this.conversationRoom(conversationId));
 
     return { ok: true, conversationId };
@@ -119,17 +148,62 @@ export class ConversationsGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingPayload
   ): Promise<{ ok: true; conversationId: string }> {
-    const context = this.getAuthorizedContext(client);
+    const data = this.getClientData(client);
     const conversationId = this.requireConversationId(payload);
 
-    await this.ensureConversationAccess(context.organizationId, conversationId);
-    client.to(this.conversationRoom(conversationId)).emit("typing.updated", {
-      conversationId,
-      membershipId: context.membershipId,
-      isTyping: payload.isTyping === true
-    });
+    const isTyping = payload.isTyping === true;
+    // Live "sneak-peek" of what the other side is typing (truncated for safety).
+    const preview = isTyping && typeof payload.preview === "string" ? payload.preview.slice(0, 200) : "";
+
+    if (data.organizationContext) {
+      this.accessService.assertPermissions(data.organizationContext, ["chat:read"]);
+      await this.ensureConversationAccess(data.organizationContext.organizationId, conversationId);
+      client.to(this.conversationRoom(conversationId)).emit("typing.updated", {
+        conversationId,
+        membershipId: data.organizationContext.membershipId,
+        senderType: "AGENT",
+        isTyping,
+        preview
+      });
+    } else if (data.visitorContext) {
+      await this.ensureVisitorConversationAccess(data.visitorContext, conversationId);
+      client.to(this.conversationRoom(conversationId)).emit("typing.updated", {
+        conversationId,
+        visitorId: data.visitorContext.visitorId,
+        senderType: "VISITOR",
+        isTyping,
+        preview
+      });
+    } else {
+      throw new Error("Socket is not authenticated");
+    }
 
     return { ok: true, conversationId };
+  }
+
+  /**
+   * Message sneak-peek: relay what a visitor is typing to every agent in the org,
+   * BEFORE any conversation exists. Keyed by visitorId (shown in the live-visitors list).
+   */
+  @SubscribeMessage("visitor.preview")
+  handleVisitorPreview(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { isTyping?: boolean; preview?: string }
+  ): { ok: boolean } {
+    const data = this.getClientData(client);
+    if (!data.visitorContext) {
+      return { ok: false };
+    }
+    const isTyping = payload?.isTyping === true;
+    const preview = isTyping && typeof payload.preview === "string" ? payload.preview.slice(0, 200) : "";
+    this.server
+      .to(this.organizationRoom(data.visitorContext.organizationId))
+      .emit("visitor.preview", {
+        visitorId: data.visitorContext.visitorId,
+        isTyping,
+        preview
+      });
+    return { ok: true };
   }
 
   emitConversationCreated(conversation: ConversationDto): void {
@@ -160,15 +234,53 @@ export class ConversationsGateway {
       .emit("message.created", { message });
   }
 
-  private getAuthorizedContext(client: Socket): OrganizationRequestContext {
-    const context = this.getClientData(client).organizationContext;
+  private async handleVisitorConnection(client: Socket): Promise<void> {
+    const widgetKey = this.extractWidgetKey(client);
+    const sessionToken = this.extractVisitorSessionToken(client);
 
-    if (!context) {
-      throw new Error("Socket is not authenticated");
+    if (!widgetKey || !sessionToken) {
+      throw new Error("Missing visitor widget credentials");
     }
 
-    this.accessService.assertPermissions(context, ["chat:read"]);
-    return context;
+    const widget = await this.prisma.chatWidget.findFirst({
+      where: {
+        publicKey: widgetKey,
+        isEnabled: true
+      }
+    });
+
+    if (!widget) {
+      throw new Error("Widget not found");
+    }
+
+    const session = await this.prisma.visitorSession.findFirst({
+      where: {
+        sessionToken,
+        organizationId: widget.organizationId,
+        widgetId: widget.id,
+        endedAt: null
+      }
+    });
+
+    if (!session) {
+      throw new Error("Invalid visitor session");
+    }
+
+    this.setClientData(client, {
+      visitorContext: {
+        organizationId: widget.organizationId,
+        widgetId: widget.id,
+        visitorId: session.visitorId,
+        sessionToken: session.sessionToken
+      }
+    });
+    await client.join(this.visitorRoom(session.sessionToken));
+    client.emit("chat.ready", {
+      organizationId: widget.organizationId,
+      widgetId: widget.id,
+      visitorId: session.visitorId,
+      visitor: true
+    });
   }
 
   private async ensureConversationAccess(
@@ -179,6 +291,24 @@ export class ConversationsGateway {
       where: {
         id: conversationId,
         organizationId
+      }
+    });
+
+    if (!conversation) {
+      throw new Error("Conversation not found");
+    }
+  }
+
+  private async ensureVisitorConversationAccess(
+    context: VisitorSocketContext,
+    conversationId: string
+  ): Promise<void> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        organizationId: context.organizationId,
+        widgetId: context.widgetId,
+        visitorId: context.visitorId
       }
     });
 
@@ -218,6 +348,21 @@ export class ConversationsGateway {
     return (
       this.getString(auth.organizationId) ??
       this.getString(client.handshake.query.organizationId)
+    );
+  }
+
+  private extractWidgetKey(client: Socket): string | null {
+    const auth = this.getHandshakeAuth(client);
+
+    return this.getString(auth.widgetKey) ?? this.getString(client.handshake.query.widgetKey);
+  }
+
+  private extractVisitorSessionToken(client: Socket): string | null {
+    const auth = this.getHandshakeAuth(client);
+
+    return (
+      this.getString(auth.sessionToken) ??
+      this.getString(client.handshake.query.sessionToken)
     );
   }
 
@@ -269,10 +414,14 @@ export class ConversationsGateway {
   private conversationRoom(conversationId: string): string {
     return `conversation:${conversationId}`;
   }
+
+  private visitorRoom(sessionToken: string): string {
+    return `visitor:${sessionToken}`;
+  }
 }
 
 function parseSocketOrigins(): string[] | boolean {
-  const rawValue = process.env.SOCKET_IO_CORS_ORIGIN ?? "http://localhost:3000";
+  const rawValue = process.env.SOCKET_IO_CORS_ORIGIN ?? "*";
   const origins = rawValue
     .split(",")
     .map((origin) => origin.trim())

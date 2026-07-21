@@ -98,6 +98,22 @@ export class AuthService {
           trialEndsAt: this.daysFromNow(14)
         }
       });
+      const widgetSecret = this.generateWidgetSecret();
+
+      await transaction.chatWidget.create({
+        data: {
+          organizationId: organization.id,
+          name: "Website widget",
+          publicKey: this.generateWidgetKey(),
+          secretHash: this.hashToken(widgetSecret),
+          welcomeMessage: "Hi there. How can we help?",
+          offlineMessage: "Leave a message and the team will reply soon.",
+          theme: {
+            accentColor: "#ff5a00",
+            position: "right"
+          }
+        }
+      });
 
       const ownerRole = await transaction.role.create({
         data: {
@@ -567,6 +583,14 @@ export class AuthService {
 
   private daysFromNow(days: number): Date {
     return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  }
+
+  private generateWidgetKey(): string {
+    return `lcw_${randomBytes(18).toString("base64url")}`;
+  }
+
+  private generateWidgetSecret(): string {
+    return randomBytes(32).toString("base64url");
   }
 
   private hashToken(token: string): string {

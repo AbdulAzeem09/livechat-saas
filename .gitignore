@@ -32,3 +32,4 @@ tmp/
 uploads/
 *.sqlite
 *.db
+apps/api/uploads/

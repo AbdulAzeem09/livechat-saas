@@ -280,7 +280,8 @@ export class OrganizationsService {
       }
     });
 
-    return this.mapInvitation(invitation);
+    // Surface the raw token once so the caller can build a shareable invite link.
+    return { ...this.mapInvitation(invitation), token };
   }
 
   private async getOrganizationOrThrow(organizationId: string) {
@@ -380,6 +381,7 @@ export class OrganizationsService {
     trialEndsAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
+    metadata?: unknown;
   }): OrganizationDto {
     return {
       id: organization.id,
@@ -389,7 +391,11 @@ export class OrganizationsService {
       planCode: organization.planCode,
       trialEndsAt: organization.trialEndsAt,
       createdAt: organization.createdAt,
-      updatedAt: organization.updatedAt
+      updatedAt: organization.updatedAt,
+      metadata:
+        organization.metadata && typeof organization.metadata === "object" && !Array.isArray(organization.metadata)
+          ? (organization.metadata as Record<string, unknown>)
+          : {}
     };
   }
 

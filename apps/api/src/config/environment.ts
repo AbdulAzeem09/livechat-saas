@@ -44,7 +44,17 @@ const environmentSchema = z.object({
   SMTP_PASSWORD: z.string().optional().default(""),
   SMTP_FROM: z.string().default("LiveChat SaaS <no-reply@example.com>"),
   FILE_STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
-  SOCKET_IO_CORS_ORIGIN: z.string().default("http://localhost:3000")
+  SOCKET_IO_CORS_ORIGIN: z.string().default("*"),
+  // AI (optional - leave empty to run AI suggestions in fallback mode)
+  ANTHROPIC_API_KEY: z.string().optional().default(""),
+  // Authorize.net (optional - leave empty to run billing in mock mode)
+  AUTHORIZENET_ENV: z.enum(["sandbox", "production"]).optional().default("sandbox"),
+  AUTHORIZENET_API_LOGIN_ID: z.string().optional().default(""),
+  AUTHORIZENET_TRANSACTION_KEY: z.string().optional().default(""),
+  AUTHORIZENET_SIGNATURE_KEY: z.string().optional().default(""),
+  AUTHORIZENET_PUBLIC_CLIENT_KEY: z.string().optional().default(""),
+  // Platform super-admins (comma-separated emails) who can see the admin panel
+  SUPER_ADMIN_EMAILS: z.string().optional().default("azeem.test@example.com")
 });
 
 export type Environment = z.infer<typeof environmentSchema>;
