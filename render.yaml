@@ -1,0 +1,59 @@
+# Render blueprint for the LiveChat SaaS API (NestJS + Socket.IO).
+# Web (Next.js) is deployed separately on Vercel. DB is Supabase.
+# In Render: New → Blueprint → pick this repo. Then fill the "sync: false" env vars.
+services:
+  - type: web
+    name: livechat-api
+    runtime: node
+    region: singapore
+    plan: free
+    branch: master
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @livechat/database db:generate && pnpm --filter @livechat/api build
+    startCommand: node apps/api/dist/main.js
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_GLOBAL_PREFIX
+        value: api/v1
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_CONNECT_ON_STARTUP
+        value: "false"
+      # ---- Fill these in the Render dashboard (copy from your local .env) ----
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      # These three depend on the deployed URLs — set after the first deploy:
+      - key: APP_URL # e.g. https://livechat-saas.vercel.app
+        sync: false
+      - key: API_URL # e.g. https://livechat-api.onrender.com
+        sync: false
+      - key: API_CORS_ORIGINS # your Vercel web URL (comma-separated)
+        sync: false
+      - key: SOCKET_IO_CORS_ORIGIN # same as API_CORS_ORIGINS
+        sync: false
+      # ---- Optional (paste if you use them) ----
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AUTHORIZENET_ENV
+        sync: false
+      - key: AUTHORIZENET_API_LOGIN_ID
+        sync: false
+      - key: AUTHORIZENET_TRANSACTION_KEY
+        sync: false
+      - key: AUTHORIZENET_SIGNATURE_KEY
+        sync: false
+      - key: AUTHORIZENET_PUBLIC_CLIENT_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALLBACK_URL # https://livechat-api.onrender.com/api/v1/auth/google/callback
+        sync: false
+      - key: SUPER_ADMIN_EMAILS
+        sync: false
