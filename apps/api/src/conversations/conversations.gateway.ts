@@ -420,7 +420,10 @@ export class ConversationsGateway {
   }
 }
 
-function parseSocketOrigins(): string[] | boolean {
+type SocketCorsCallback = (err: Error | null, allow?: boolean) => void;
+function parseSocketOrigins():
+  | boolean
+  | ((origin: string | undefined, callback: SocketCorsCallback) => void) {
   const rawValue = process.env.SOCKET_IO_CORS_ORIGIN ?? "*";
   const origins = rawValue
     .split(",")
@@ -431,5 +434,26 @@ function parseSocketOrigins(): string[] | boolean {
     return true;
   }
 
-  return origins;
+  const normalized = origins.map((origin) => origin.replace(/\/+$/, ""));
+
+  // Robust check: configured origins (trailing-slash tolerant), any *.vercel.app
+  // deployment (production + previews), and localhost. Mirrors the HTTP CORS check.
+  return (origin: string | undefined, callback: SocketCorsCallback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const cleaned = origin.replace(/\/+$/, "");
+    let hostname = "";
+    try {
+      hostname = new URL(origin).hostname.toLowerCase();
+    } catch {
+      hostname = "";
+    }
+    const allowed =
+      normalized.includes(cleaned) ||
+      hostname.endsWith(".vercel.app") ||
+      hostname === "localhost";
+    callback(null, allowed);
+  };
 }
