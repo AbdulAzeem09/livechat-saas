@@ -246,7 +246,7 @@ export class WidgetsController {
 
   private getMetadata(request: Request) {
     return {
-      ipAddress: request.ip,
+      ipAddress: this.resolveClientIp(request),
       userAgent:
         typeof request.headers["user-agent"] === "string"
           ? request.headers["user-agent"]
@@ -258,5 +258,43 @@ export class WidgetsController {
             ? request.headers.referer
             : undefined
     };
+  }
+
+  /**
+   * Behind Render/Cloudflare there can be multiple proxy hops, so `request.ip`
+   * (Express trust-proxy) may resolve to an internal proxy address instead of the
+   * real visitor. Prefer the left-most public IP in X-Forwarded-For (the original
+   * client), falling back to request.ip.
+   */
+  private resolveClientIp(request: Request): string | undefined {
+    const forwarded = request.headers["x-forwarded-for"];
+    const raw = Array.isArray(forwarded) ? forwarded.join(",") : forwarded;
+    if (typeof raw === "string" && raw.length > 0) {
+      const candidates = raw
+        .split(",")
+        .map((part) => part.trim().replace(/^::ffff:/, ""))
+        .filter(Boolean);
+      const publicIp = candidates.find((ip) => this.isPublicIp(ip));
+      if (publicIp) {
+        return publicIp;
+      }
+    }
+    return request.ip;
+  }
+
+  private isPublicIp(ip: string): boolean {
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
+      return false;
+    }
+    if (/^10\./.test(ip) || /^192\.168\./.test(ip)) {
+      return false;
+    }
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) {
+      return false;
+    }
+    if (/^(fc|fd)/i.test(ip)) {
+      return false;
+    }
+    return true;
   }
 }
