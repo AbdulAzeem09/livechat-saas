@@ -54,7 +54,7 @@ export function configureApp(app: INestApplication, config: ConfigService): void
   });
   app.enableCors({
     credentials: true,
-    origin: corsOrigins
+    origin: buildCorsOriginCheck(corsOrigins)
   });
   app.setGlobalPrefix(globalPrefix);
   app.useGlobalPipes(
@@ -87,4 +87,39 @@ function parseCorsOrigins(value: string): string[] | boolean {
   }
 
   return origins;
+}
+
+/**
+ * Robust CORS check: allows the configured origins (trailing-slash tolerant),
+ * plus any *.vercel.app deployment (production + previews) so the frontend "just
+ * works" without pinning an exact URL. Requests with no Origin (curl, health
+ * checks, server-to-server) are allowed.
+ */
+type CorsCallback = (err: Error | null, allow?: boolean) => void;
+function buildCorsOriginCheck(
+  configured: string[] | boolean
+): boolean | ((origin: string | undefined, callback: CorsCallback) => void) {
+  if (typeof configured === "boolean") {
+    return configured;
+  }
+  const normalized = configured.map((origin) => origin.replace(/\/+$/, ""));
+
+  return (origin: string | undefined, callback: CorsCallback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const cleaned = origin.replace(/\/+$/, "");
+    let hostname = "";
+    try {
+      hostname = new URL(origin).hostname.toLowerCase();
+    } catch {
+      hostname = "";
+    }
+    const allowed =
+      normalized.includes(cleaned) ||
+      hostname.endsWith(".vercel.app") ||
+      hostname === "localhost";
+    callback(null, allowed);
+  };
 }
