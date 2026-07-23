@@ -86,6 +86,15 @@ export class VisitorsService {
     const isOnline = Date.now() - lastSeen < ONLINE_WINDOW_MS;
     const activity = extra.conversation ? "Chatting" : isOnline ? "Browsing" : "Left website";
 
+    // ISP + network type (vpn/hosting/mobile/residential) are stored in the
+    // session metadata JSON by the geo lookup — read them back defensively.
+    const meta =
+      extra.session?.metadata && typeof extra.session.metadata === "object"
+        ? (extra.session.metadata as Record<string, unknown>)
+        : {};
+    const isp = typeof meta.isp === "string" ? meta.isp : null;
+    const network = typeof meta.network === "string" ? meta.network : null;
+
     return {
       id: visitor.id,
       name: visitor.name,
@@ -100,6 +109,8 @@ export class VisitorsService {
       country: extra.session?.country ?? null,
       state: extra.session?.region ?? null,
       city: extra.session?.city ?? null,
+      isp,
+      network,
       ip: visitor.lastIp ?? extra.session?.ipAddress ?? null,
       activity,
       chattingWithAgentId: extra.conversation?.assignedAgentId ?? null,

@@ -40,6 +40,15 @@ export class LiveVisitorDto {
   @ApiPropertyOptional({ nullable: true })
   city!: string | null;
 
+  @ApiPropertyOptional({ nullable: true, description: "Internet provider (ISP) name" })
+  isp!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: "Network type of the visitor's IP: vpn | hosting | mobile | residential"
+  })
+  network!: string | null;
+
   @ApiPropertyOptional({ nullable: true, description: "Visitor IP address" })
   ip!: string | null;
 

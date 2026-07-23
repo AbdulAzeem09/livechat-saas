@@ -308,6 +308,8 @@ export interface LiveVisitor {
   country: string | null;
   state: string | null;
   city: string | null;
+  isp: string | null;
+  network: string | null;
   ip: string | null;
   activity: string;
   chattingWithAgentId: string | null;

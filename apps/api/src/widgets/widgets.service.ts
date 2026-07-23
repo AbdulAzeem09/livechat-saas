@@ -776,9 +776,13 @@ export class WidgetsService {
   }
 
   /**
-   * Look up the visitor's geolocation from their IP (free ip-api.com, no key) and
-   * store country/region/city on the session. Fire-and-forget: never blocks the
-   * widget response and silently no-ops for localhost/private IPs or on failure.
+   * Look up the visitor's geolocation and network type from their IP (free
+   * ip-api.com, no key) and store country/region/city, the ISP, and a network
+   * label on the session. The free endpoint's `proxy`/`hosting`/`mobile` flags
+   * let us tell a VPN/proxy or datacenter IP from a normal home/mobile one — but
+   * they only reveal that the *visible* IP is a VPN, never the real IP behind it.
+   * Fire-and-forget: never blocks the widget response and silently no-ops for
+   * localhost/private IPs or on failure.
    */
   private async resolveSessionGeo(sessionId: string, ip: string | undefined): Promise<void> {
     if (!ip || !this.isPublicIp(ip)) {
@@ -788,7 +792,7 @@ export class WidgetsService {
     try {
       const clean = ip.replace(/^::ffff:/, "");
       const response = await fetch(
-        `http://ip-api.com/json/${encodeURIComponent(clean)}?fields=status,country,regionName,city`,
+        `http://ip-api.com/json/${encodeURIComponent(clean)}?fields=status,country,regionName,city,isp,proxy,hosting,mobile`,
         { signal: AbortSignal.timeout(4000) }
       );
       if (!response.ok) {
@@ -799,16 +803,42 @@ export class WidgetsService {
         country?: string;
         regionName?: string;
         city?: string;
+        isp?: string;
+        proxy?: boolean;
+        hosting?: boolean;
+        mobile?: boolean;
       };
       if (geo.status !== "success") {
         return;
       }
+      // Collapse the flags into one label, most-suspicious first: a proxy/VPN/Tor
+      // exit wins over a datacenter IP, which wins over mobile; otherwise it's a
+      // normal residential connection.
+      const network = geo.proxy
+        ? "vpn"
+        : geo.hosting
+          ? "hosting"
+          : geo.mobile
+            ? "mobile"
+            : "residential";
+      // ISP + network type live in the session's metadata JSON (no dedicated
+      // columns), so we merge rather than overwrite the visitor-supplied metadata.
+      const existing = await this.prisma.visitorSession.findUnique({
+        where: { id: sessionId },
+        select: { metadata: true }
+      });
+      const metadata = this.toRecord(existing?.metadata ?? {});
       await this.prisma.visitorSession.update({
         where: { id: sessionId },
         data: {
           ...(geo.country ? { country: geo.country } : {}),
           ...(geo.regionName ? { region: geo.regionName } : {}),
-          ...(geo.city ? { city: geo.city } : {})
+          ...(geo.city ? { city: geo.city } : {}),
+          metadata: {
+            ...metadata,
+            network,
+            ...(geo.isp ? { isp: geo.isp } : {})
+          }
         }
       });
     } catch {

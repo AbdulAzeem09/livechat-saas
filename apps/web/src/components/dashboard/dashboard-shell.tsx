@@ -3,6 +3,7 @@
 import {
   type ComponentType,
   type FormEvent,
+  type ReactElement,
   useCallback,
   useEffect,
   useMemo,
@@ -4216,6 +4217,49 @@ function avatarColor(seed: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0]!;
 }
 
+// Flag the visitor's IP type. We deliberately show nothing for a normal
+// residential connection to keep the list clean — only the notable cases
+// (VPN/proxy, datacenter, mobile) get a badge.
+const NETWORK_BADGES: Record<string, { label: string; icon: string; className: string; title: string }> = {
+  vpn: {
+    label: "VPN",
+    icon: "🛡️",
+    className: "bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30",
+    title: "This IP belongs to a VPN, proxy or Tor exit — the visitor is hiding their real IP."
+  },
+  hosting: {
+    label: "Datacenter",
+    icon: "🖥️",
+    className: "bg-red-400/15 text-red-300 ring-1 ring-red-400/30",
+    title: "This IP belongs to a datacenter / hosting provider — often a bot, scraper or VPN."
+  },
+  mobile: {
+    label: "Mobile",
+    icon: "📱",
+    className: "bg-sky-400/15 text-sky-300 ring-1 ring-sky-400/30",
+    title: "This visitor is on a mobile / cellular network."
+  }
+};
+
+function NetworkBadge({ network }: { network: string | null }): ReactElement | null {
+  const badge = network ? NETWORK_BADGES[network] : undefined;
+  if (!badge) {
+    return null;
+  }
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold",
+        badge.className
+      )}
+      title={badge.title}
+    >
+      <span aria-hidden>{badge.icon}</span>
+      {badge.label}
+    </span>
+  );
+}
+
 function TrafficScreen({
   chatLink,
   liveVisitors,
@@ -4345,11 +4389,16 @@ function TrafficScreen({
                     U
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold">{name}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-semibold">{name}</span>
+                      <NetworkBadge network={visitor.network} />
+                    </span>
                     {typing ? (
                       <span className="block truncate text-[11px] italic text-emerald-300/90">
                         ✍️ {typing}
                       </span>
+                    ) : visitor.isp ? (
+                      <span className="block truncate text-[11px] text-white/35">{visitor.isp}</span>
                     ) : null}
                   </span>
                 </div>
