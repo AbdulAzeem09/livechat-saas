@@ -129,3 +129,83 @@ export function showBrowserNotification(title: string, body: string): void {
     // ignore
   }
 }
+
+export type VoiceGender = "female" | "male";
+
+// Voices load asynchronously in some browsers; cache them and refresh on change.
+let cachedVoices: SpeechSynthesisVoice[] = [];
+
+function loadVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return [];
+  }
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    cachedVoices = voices;
+  }
+  return cachedVoices;
+}
+
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  loadVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", () => {
+    loadVoices();
+  });
+}
+
+/** Pick the best-matching English voice for the requested gender, with fallbacks. */
+function pickVoice(gender: VoiceGender): SpeechSynthesisVoice | null {
+  const voices = loadVoices().filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+  const pool = voices.length > 0 ? voices : cachedVoices;
+  if (pool.length === 0) {
+    return null;
+  }
+
+  const femaleHints = ["female", "zira", "samantha", "victoria", "susan", "karen", "moira", "tessa", "fiona", "google us english"];
+  const maleHints = ["male", "david", "mark", "daniel", "alex", "fred", "george", "james", "google uk english male"];
+  const wanted = gender === "female" ? femaleHints : maleHints;
+  const avoid = gender === "female" ? maleHints : femaleHints;
+
+  const match = pool.find((voice) => {
+    const name = voice.name.toLowerCase();
+    return wanted.some((hint) => name.includes(hint));
+  });
+  if (match) {
+    return match;
+  }
+
+  // Fall back to any voice that at least isn't obviously the other gender.
+  const neutral = pool.find((voice) => {
+    const name = voice.name.toLowerCase();
+    return !avoid.some((hint) => name.includes(hint));
+  });
+  return neutral ?? pool[0] ?? null;
+}
+
+/**
+ * Speak a short phrase aloud (e.g. "New visitor") in a male or female voice using
+ * the browser's Speech Synthesis. Best-effort: silently no-ops if unsupported.
+ */
+export function speak(text: string, gender: VoiceGender = "female"): void {
+  try {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return;
+    }
+    const synth = window.speechSynthesis;
+    // Drop any queued phrase so alerts don't stack up during a rush of visitors.
+    synth.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voice = pickVoice(gender);
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    }
+    utterance.rate = 1;
+    utterance.pitch = gender === "female" ? 1.15 : 0.85;
+    utterance.volume = 1;
+    synth.speak(utterance);
+  } catch {
+    // Speech is best-effort; never break the app for a failed announcement.
+  }
+}

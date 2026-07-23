@@ -60,6 +60,8 @@ import {
   ThumbsUp,
   UserRound,
   UsersRound,
+  Volume2,
+  VolumeX,
   X,
   Zap
 } from "lucide-react";
@@ -128,7 +130,8 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { initials } from "@/lib/format";
-import { playChime, primeAudio, requestNotificationPermission, showBrowserNotification } from "@/lib/notify";
+import { playChime, primeAudio, requestNotificationPermission, showBrowserNotification, speak } from "@/lib/notify";
+import type { VoiceGender } from "@/lib/notify";
 import { clearSession, readSession, type StoredSession } from "@/lib/session";
 import type {
   ApiKey,
@@ -495,6 +498,10 @@ export function DashboardShell() {
   const [report, setReport] = useState<ReportSummary | null>(null);
   const [liveVisitors, setLiveVisitors] = useState<LiveVisitor[]>([]);
   const [visitorPreviews, setVisitorPreviews] = useState<Record<string, string>>({});
+  // Voice announcement for new visitors ("off" | "female" | "male"), persisted per browser.
+  const [voiceAlert, setVoiceAlert] = useState<"off" | VoiceGender>("off");
+  const seenVisitorIdsRef = useRef<Set<string>>(new Set());
+  const voiceAlertRef = useRef<"off" | VoiceGender>("off");
   const visitorPreviewTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [departments, setDepartments] = useState<Department[]>([]);
   const [billing, setBilling] = useState<BillingOverview | null>(null);
@@ -669,13 +676,29 @@ export function DashboardShell() {
     }
 
     let cancelled = false;
+    // First poll seeds the "seen" set silently so we don't announce everyone at once.
+    let primed = false;
 
     const load = () => {
       listLiveVisitors(organizationId, session.accessToken)
         .then((visitors) => {
-          if (!cancelled) {
-            setLiveVisitors(visitors);
+          if (cancelled) {
+            return;
           }
+          setLiveVisitors(visitors);
+
+          const seen = seenVisitorIdsRef.current;
+          const arrivals = visitors.filter((visitor) => !seen.has(visitor.id));
+          for (const visitor of visitors) {
+            seen.add(visitor.id);
+          }
+
+          if (primed && arrivals.length > 0 && voiceAlertRef.current !== "off") {
+            playChime();
+            const phrase = arrivals.length > 1 ? `${arrivals.length} new visitors` : "New visitor";
+            speak(phrase, voiceAlertRef.current);
+          }
+          primed = true;
         })
         .catch(() => {});
     };
@@ -877,6 +900,28 @@ export function DashboardShell() {
       window.removeEventListener("keydown", unlock);
     };
   }, []);
+
+  useEffect(() => {
+    // Restore the saved new-visitor voice-alert preference.
+    try {
+      const saved = window.localStorage.getItem("livechat:voice-alert");
+      if (saved === "female" || saved === "male" || saved === "off") {
+        setVoiceAlert(saved);
+        voiceAlertRef.current = saved;
+      }
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  useEffect(() => {
+    voiceAlertRef.current = voiceAlert;
+    try {
+      window.localStorage.setItem("livechat:voice-alert", voiceAlert);
+    } catch {
+      // ignore storage failures
+    }
+  }, [voiceAlert]);
 
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
@@ -2659,6 +2704,8 @@ export function DashboardShell() {
                   onCopy={handleCopy}
                   onOpenConversation={handleOpenConversationById}
                   typingPreviews={visitorPreviews}
+                  voiceAlert={voiceAlert}
+                  onChangeVoiceAlert={setVoiceAlert}
                 />
               )}
 
@@ -4176,7 +4223,9 @@ function TrafficScreen({
   onAction,
   onCopy,
   onOpenConversation,
-  typingPreviews
+  typingPreviews,
+  voiceAlert,
+  onChangeVoiceAlert
 }: {
   chatLink: string;
   liveVisitors: LiveVisitor[];
@@ -4185,6 +4234,8 @@ function TrafficScreen({
   onCopy: (text: string, copiedMessage?: string) => Promise<void>;
   onOpenConversation: (conversationId: string) => void;
   typingPreviews: Record<string, string>;
+  voiceAlert: "off" | VoiceGender;
+  onChangeVoiceAlert: (value: "off" | VoiceGender) => void;
 }) {
   const [tab, setTab] = useState<(typeof TRAFFIC_TABS)[number]>("All customers");
 
@@ -4238,6 +4289,32 @@ function TrafficScreen({
         >
           <Plus className="h-3.5 w-3.5" aria-hidden /> Add filter
         </button>
+
+        {/* New-visitor voice alert: Off / Female / Male */}
+        <div className="ml-auto flex items-center gap-1.5" title="Play a voice when a new visitor arrives">
+          {voiceAlert === "off" ? (
+            <VolumeX className="h-3.5 w-3.5 text-white/50" aria-hidden />
+          ) : (
+            <Volume2 className="h-3.5 w-3.5 text-[#4ea2ff]" aria-hidden />
+          )}
+          <span className="hidden text-white/50 sm:inline">New-visitor voice</span>
+          <select
+            className="rounded-md border border-[#3a3a42] bg-[#2a2a30] px-2 py-1.5 font-semibold text-white/90 outline-none hover:bg-white/5"
+            onChange={(event) => {
+              const next = event.target.value as "off" | VoiceGender;
+              onChangeVoiceAlert(next);
+              if (next !== "off") {
+                // Immediate feedback so the agent hears the chosen voice.
+                speak("Voice alerts on", next);
+              }
+            }}
+            value={voiceAlert}
+          >
+            <option value="off">Off</option>
+            <option value="female">Female voice</option>
+            <option value="male">Male voice</option>
+          </select>
+        </div>
       </div>
 
       {/* Column headers */}
