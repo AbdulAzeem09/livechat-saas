@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type ChangeEvent,
   type ComponentType,
   type FormEvent,
   type ReactElement,
@@ -90,6 +91,8 @@ import {
   deleteKnowledge as deleteKnowledgeRequest,
   deleteTicket as deleteTicketRequest,
   deleteWebhook as deleteWebhookRequest,
+  importKnowledgePdf as importKnowledgePdfRequest,
+  importKnowledgeWebsite as importKnowledgeWebsiteRequest,
   listApiKeys,
   listCampaigns,
   listGoals,
@@ -2195,6 +2198,60 @@ export function DashboardShell() {
     }
   }
 
+  async function handleImportWebsite(url: string): Promise<boolean> {
+    if (!session || !activeOrganization || !url.trim()) {
+      return false;
+    }
+    setError("");
+    try {
+      const created = await importKnowledgeWebsiteRequest(activeOrganization.id, session.accessToken, url.trim());
+      setKnowledge((current) => [created, ...current]);
+      setNotice(`Imported "${created.title}" from the website.`);
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to import that website");
+      return false;
+    }
+  }
+
+  async function handleImportPdf(file: File): Promise<boolean> {
+    if (!session || !activeOrganization) {
+      return false;
+    }
+    setError("");
+    try {
+      const created = await importKnowledgePdfRequest(activeOrganization.id, session.accessToken, file);
+      setKnowledge((current) => [created, ...current]);
+      setNotice(`Imported "${created.title}" from the PDF.`);
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to read that PDF");
+      return false;
+    }
+  }
+
+  async function handleSaveAiSettings(next: AiReceptionistSettings): Promise<boolean> {
+    if (!session || !activeOrganization) {
+      return false;
+    }
+    setError("");
+    const metadata = {
+      ...(activeOrganization.metadata ?? {}),
+      aiReceptionist: next
+    };
+    try {
+      const updated = await updateOrganizationRequest(activeOrganization.id, session.accessToken, { metadata });
+      setOrganizations((current) =>
+        current.map((org) => (org.id === updated.id ? { ...org, ...updated } : org))
+      );
+      setNotice("AI receptionist settings saved.");
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to save AI settings");
+      return false;
+    }
+  }
+
   async function handleAiSuggest() {
     if (!session || !activeOrganization || !selectedConversation) {
       setNotice("Open a conversation first.");
@@ -2748,9 +2805,13 @@ export function DashboardShell() {
 
               {activeScreen === "automate" && activeSecondary === "Knowledge hub" && (
                 <KnowledgeHubScreen
+                  aiSettings={readAiSettings(activeOrganization?.metadata)}
                   articles={knowledge}
                   onCreate={handleCreateKnowledge}
                   onDelete={(id) => void handleDeleteKnowledge(id)}
+                  onImportPdf={handleImportPdf}
+                  onImportWebsite={handleImportWebsite}
+                  onSaveAiSettings={handleSaveAiSettings}
                   onToggle={(article) => void handleToggleKnowledge(article)}
                 />
               )}
@@ -4889,15 +4950,165 @@ function GoalsScreen({
   );
 }
 
+export type AiReceptionistMode = "off" | "suggest" | "auto";
+
+export interface AiReceptionistSettings {
+  mode: AiReceptionistMode;
+  name: string;
+  tone: string;
+}
+
+const DEFAULT_AI_SETTINGS: AiReceptionistSettings = {
+  mode: "off",
+  name: "Assistant",
+  tone: "friendly and professional"
+};
+
+/** Read the AI receptionist settings out of an organization's free-form metadata. */
+function readAiSettings(metadata: Record<string, unknown> | undefined): AiReceptionistSettings {
+  const raw = metadata && typeof metadata === "object" ? metadata.aiReceptionist : undefined;
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULT_AI_SETTINGS };
+  }
+  const r = raw as Record<string, unknown>;
+  const mode: AiReceptionistMode =
+    r.mode === "suggest" || r.mode === "auto" || r.mode === "off" ? r.mode : DEFAULT_AI_SETTINGS.mode;
+  return {
+    mode,
+    name: typeof r.name === "string" && r.name.trim() ? r.name : DEFAULT_AI_SETTINGS.name,
+    tone: typeof r.tone === "string" && r.tone.trim() ? r.tone : DEFAULT_AI_SETTINGS.tone
+  };
+}
+
+const AI_MODE_OPTIONS: Array<{ value: AiReceptionistMode; label: string; hint: string }> = [
+  { value: "off", label: "Off", hint: "AI stays out of chats." },
+  { value: "suggest", label: "Suggest to agent", hint: "Drafts a reply your agent can send in one click." },
+  { value: "auto", label: "Auto-reply", hint: "AI answers visitors itself from your knowledge." }
+];
+
+function AiReceptionistCard({
+  settings,
+  onSave
+}: {
+  settings: AiReceptionistSettings;
+  onSave: (next: AiReceptionistSettings) => Promise<boolean>;
+}) {
+  const [mode, setMode] = useState<AiReceptionistMode>(settings.mode);
+  const [name, setName] = useState(settings.name);
+  const [tone, setTone] = useState(settings.tone);
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync local state if the organization's saved settings change underneath us.
+  useEffect(() => {
+    setMode(settings.mode);
+    setName(settings.name);
+    setTone(settings.tone);
+  }, [settings.mode, settings.name, settings.tone]);
+
+  const dirty = mode !== settings.mode || name !== settings.name || tone !== settings.tone;
+
+  async function save() {
+    setSaving(true);
+    await onSave({ mode, name: name.trim() || DEFAULT_AI_SETTINGS.name, tone: tone.trim() || DEFAULT_AI_SETTINGS.tone });
+    setSaving(false);
+  }
+
+  return (
+    <div className="mb-6 rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-lg" aria-hidden>✨</span>
+        <h3 className="text-base font-bold">AI Receptionist</h3>
+        <span
+          className={cn(
+            "ml-1 rounded px-2 py-0.5 text-[10px] font-bold",
+            settings.mode === "off" ? "bg-slate-200 text-slate-600" : "bg-emerald-100 text-emerald-700"
+          )}
+        >
+          {settings.mode === "off" ? "Disabled" : settings.mode === "auto" ? "Auto-replying" : "Assisting agents"}
+        </span>
+      </div>
+      <p className="mb-4 text-sm text-slate-500">
+        Answers customers using only the knowledge below. If it isn&apos;t sure, it hands the chat to a human.
+      </p>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        {AI_MODE_OPTIONS.map((option) => (
+          <button
+            className={cn(
+              "rounded-lg border p-3 text-left transition",
+              mode === option.value
+                ? "border-violet-400 bg-violet-100/60 ring-1 ring-violet-300"
+                : "border-slate-200 bg-white hover:border-slate-300"
+            )}
+            key={option.value}
+            onClick={() => setMode(option.value)}
+            type="button"
+          >
+            <span className="block text-sm font-bold">{option.label}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          <span className="mb-1 block font-semibold text-slate-700">Assistant name</span>
+          <input
+            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-violet-400"
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Aria"
+            value={name}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-semibold text-slate-700">Tone / persona</span>
+          <input
+            className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-violet-400"
+            onChange={(e) => setTone(e.target.value)}
+            placeholder="e.g. friendly and concise"
+            value={tone}
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-500 disabled:opacity-50"
+          disabled={!dirty || saving}
+          onClick={() => void save()}
+          type="button"
+        >
+          {saving ? "Saving…" : "Save AI settings"}
+        </button>
+        {mode !== "off" && (
+          <span className="text-[11px] text-slate-500">
+            Needs at least one knowledge source below to answer from.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const CATEGORY_ICON: Record<string, string> = { Website: "🌐", PDF: "📄" };
+
 function KnowledgeHubScreen({
+  aiSettings,
   articles,
   onCreate,
   onDelete,
+  onImportPdf,
+  onImportWebsite,
+  onSaveAiSettings,
   onToggle
 }: {
+  aiSettings: AiReceptionistSettings;
   articles: KnowledgeArticle[];
   onCreate: (input: { title: string; content: string; category: string }) => Promise<boolean>;
   onDelete: (id: string) => void;
+  onImportPdf: (file: File) => Promise<boolean>;
+  onImportWebsite: (url: string) => Promise<boolean>;
+  onSaveAiSettings: (next: AiReceptionistSettings) => Promise<boolean>;
   onToggle: (article: KnowledgeArticle) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
@@ -4905,6 +5116,10 @@ function KnowledgeHubScreen({
   const [category, setCategory] = useState("General");
   const [content, setContent] = useState("");
   const [query, setQuery] = useState("");
+  const [showWebsite, setShowWebsite] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4920,6 +5135,30 @@ function KnowledgeHubScreen({
     }
   }
 
+  async function submitWebsite() {
+    if (!websiteUrl.trim() || importing) {
+      return;
+    }
+    setImporting(true);
+    const ok = await onImportWebsite(websiteUrl.trim());
+    setImporting(false);
+    if (ok) {
+      setWebsiteUrl("");
+      setShowWebsite(false);
+    }
+  }
+
+  async function onPdfChosen(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    setImporting(true);
+    await onImportPdf(file);
+    setImporting(false);
+  }
+
   const filtered = query.trim()
     ? articles.filter(
         (a) =>
@@ -4931,24 +5170,93 @@ function KnowledgeHubScreen({
   return (
     <div className="min-h-full bg-white px-6 py-6 text-[#111214]">
       <div className="mx-auto max-w-4xl">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <BookOpen className="h-7 w-7 text-[#2f6bff]" aria-hidden />
-            <div>
-              <h2 className="text-xl font-bold">Knowledge hub</h2>
-              <p className="text-sm text-slate-500">
-                Help articles for self-service — also used to train your chatbot&apos;s answers.
-              </p>
-            </div>
+        <div className="mb-5 flex items-center gap-3">
+          <BookOpen className="h-7 w-7 text-[#2f6bff]" aria-hidden />
+          <div>
+            <h2 className="text-xl font-bold">Knowledge hub</h2>
+            <p className="text-sm text-slate-500">
+              Add your business knowledge, then let the AI receptionist answer from it.
+            </p>
           </div>
+        </div>
+
+        <AiReceptionistCard onSave={onSaveAiSettings} settings={aiSettings} />
+
+        <input
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={(e) => void onPdfChosen(e)}
+          ref={pdfInputRef}
+          type="file"
+        />
+
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <button
-            className="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-bold text-white hover:bg-[#3f78ff]"
-            onClick={() => setShowForm((current) => !current)}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 text-left hover:border-[#2f6bff] disabled:opacity-60"
+            disabled={importing}
+            onClick={() => {
+              setShowWebsite((v) => !v);
+              setShowForm(false);
+            }}
             type="button"
           >
-            {showForm ? "Close" : "+ New article"}
+            <span className="text-2xl" aria-hidden>🌐</span>
+            <span>
+              <span className="block text-sm font-bold">Add website</span>
+              <span className="block text-[11px] text-slate-500">Import a public page&apos;s text</span>
+            </span>
+          </button>
+          <button
+            className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 text-left hover:border-[#2f6bff] disabled:opacity-60"
+            disabled={importing}
+            onClick={() => pdfInputRef.current?.click()}
+            type="button"
+          >
+            <span className="text-2xl" aria-hidden>📄</span>
+            <span>
+              <span className="block text-sm font-bold">{importing ? "Working…" : "Add PDF"}</span>
+              <span className="block text-[11px] text-slate-500">Upload a PDF document</span>
+            </span>
+          </button>
+          <button
+            className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 text-left hover:border-[#2f6bff]"
+            onClick={() => {
+              setShowForm((v) => !v);
+              setShowWebsite(false);
+            }}
+            type="button"
+          >
+            <span className="text-2xl" aria-hidden>✍️</span>
+            <span>
+              <span className="block text-sm font-bold">Write Q&amp;A</span>
+              <span className="block text-[11px] text-slate-500">Type an answer yourself</span>
+            </span>
           </button>
         </div>
+
+        {showWebsite && (
+          <div className="mb-6 flex flex-col gap-2 rounded-xl border border-slate-200 p-4 sm:flex-row">
+            <input
+              className="h-10 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-[#2f6bff]"
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void submitWebsite();
+                }
+              }}
+              placeholder="https://your-website.com/about"
+              value={websiteUrl}
+            />
+            <button
+              className="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-bold text-white hover:bg-[#3f78ff] disabled:opacity-60"
+              disabled={!websiteUrl.trim() || importing}
+              onClick={() => void submitWebsite()}
+              type="button"
+            >
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+        )}
 
         {showForm && (
           <form className="mb-6 space-y-3 rounded-xl border border-slate-200 p-5" onSubmit={submit}>
@@ -5016,6 +5324,7 @@ function KnowledgeHubScreen({
                   <div className="flex items-center gap-2">
                     <p className="truncate text-sm font-bold">{article.title}</p>
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {CATEGORY_ICON[article.category] ? `${CATEGORY_ICON[article.category]} ` : ""}
                       {article.category}
                     </span>
                     {!article.published && (

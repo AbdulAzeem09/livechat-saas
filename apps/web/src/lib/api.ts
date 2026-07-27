@@ -790,6 +790,41 @@ export function deleteKnowledge(
   });
 }
 
+export function importKnowledgeWebsite(
+  organizationId: string,
+  accessToken: string,
+  url: string
+): Promise<KnowledgeArticle> {
+  return apiRequest<KnowledgeArticle>(`/organizations/${organizationId}/knowledge/import/website`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ url })
+  });
+}
+
+export async function importKnowledgePdf(
+  organizationId: string,
+  accessToken: string,
+  file: File
+): Promise<KnowledgeArticle> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${API_URL}/organizations/${organizationId}/knowledge/import/pdf`, {
+    method: "POST",
+    credentials: "include",
+    headers: { authorization: `Bearer ${accessToken}` },
+    body: form
+  });
+
+  if (!response.ok) {
+    const body = await readErrorBody(response);
+    throw new ApiClientError(body?.error.message ?? "PDF import failed", response.status, body);
+  }
+
+  return (await response.json()) as KnowledgeArticle;
+}
+
 export function listApiKeys(organizationId: string, accessToken: string): Promise<ApiKey[]> {
   return apiRequest<ApiKey[]>(`/organizations/${organizationId}/api-keys`, { accessToken });
 }

@@ -8,6 +8,7 @@ import {
   ParticipantType,
   Prisma
 } from "@prisma/client";
+import { AiService } from "../ai/ai.service";
 import { ConversationsGateway } from "../conversations/conversations.gateway";
 import type { MessageDto } from "../conversations/dto/conversation-response.dto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -22,7 +23,8 @@ const MAX_REPLIES_PER_MESSAGE = 3;
 export class AutomationService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: ConversationsGateway
+    private readonly gateway: ConversationsGateway,
+    private readonly ai: AiService
   ) {}
 
   async list(organizationId: string): Promise<AutomationRuleDto[]> {
@@ -113,11 +115,40 @@ export class AutomationService {
       await this.postBotReply(organizationId, conversationId, rule);
     }
 
-    // If no keyword rule answered the visitor's question, try the Knowledge Base.
+    // If no keyword rule answered the visitor's question, let the AI receptionist
+    // (or the legacy keyword Knowledge Base) try to answer.
     const answeredByRule = matched.some((rule) => !rule.isGreeting);
     if (!answeredByRule && body.trim().length > 4) {
-      await this.answerFromKnowledgeBase(organizationId, conversationId, body).catch(() => {});
+      await this.maybeAiOrKbReply(organizationId, conversationId, body).catch(() => {});
     }
+  }
+
+  /**
+   * Decide how an unanswered visitor message is handled, based on the org's AI
+   * receptionist mode:
+   *  - "auto":    the AI answers from the knowledge base (only if it's confident).
+   *  - "suggest": stay silent — a human agent replies with a Copilot draft.
+   *  - "off":     legacy behaviour — echo the best-matching KB article verbatim.
+   */
+  private async maybeAiOrKbReply(
+    organizationId: string,
+    conversationId: string,
+    body: string
+  ): Promise<void> {
+    const settings = await this.ai.getSettings(organizationId);
+
+    if (settings.mode === "auto") {
+      const answer = await this.ai.answerFromKnowledge(organizationId, body);
+      if (answer.confident && answer.answer.trim()) {
+        await this.postBotReplyText(organizationId, conversationId, answer.answer, { ai: true });
+      }
+      return;
+    }
+
+    if (settings.mode === "off") {
+      await this.answerFromKnowledgeBase(organizationId, conversationId, body);
+    }
+    // "suggest": do nothing here — the agent triggers a suggestion from Copilot.
   }
 
   /** Chatbot fallback: find a published KB article matching the message and reply with it. */
