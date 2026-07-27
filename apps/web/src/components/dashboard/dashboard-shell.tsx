@@ -2252,6 +2252,28 @@ export function DashboardShell() {
     }
   }
 
+  async function handleSaveLegalSettings(next: LegalIntakeSettings): Promise<boolean> {
+    if (!session || !activeOrganization) {
+      return false;
+    }
+    setError("");
+    const metadata = {
+      ...(activeOrganization.metadata ?? {}),
+      legalIntake: next
+    };
+    try {
+      const updated = await updateOrganizationRequest(activeOrganization.id, session.accessToken, { metadata });
+      setOrganizations((current) =>
+        current.map((org) => (org.id === updated.id ? { ...org, ...updated } : org))
+      );
+      setNotice(next.enabled ? "Legal firm mode saved." : "Legal settings saved.");
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to save legal settings");
+      return false;
+    }
+  }
+
   async function handleAiSuggest() {
     if (!session || !activeOrganization || !selectedConversation) {
       setNotice("Open a conversation first.");
@@ -2807,11 +2829,13 @@ export function DashboardShell() {
                 <KnowledgeHubScreen
                   aiSettings={readAiSettings(activeOrganization?.metadata)}
                   articles={knowledge}
+                  legalSettings={readLegalSettings(activeOrganization?.metadata)}
                   onCreate={handleCreateKnowledge}
                   onDelete={(id) => void handleDeleteKnowledge(id)}
                   onImportPdf={handleImportPdf}
                   onImportWebsite={handleImportWebsite}
                   onSaveAiSettings={handleSaveAiSettings}
+                  onSaveLegal={handleSaveLegalSettings}
                   onToggle={(article) => void handleToggleKnowledge(article)}
                 />
               )}
@@ -4980,6 +5004,56 @@ function readAiSettings(metadata: Record<string, unknown> | undefined): AiRecept
   };
 }
 
+export interface LegalIntakeSettings {
+  enabled: boolean;
+  firmName: string;
+  licensedStates: string[];
+  practiceAreas: string[];
+  conflictNames: string[];
+  disclaimer: string;
+  bilingual: boolean;
+}
+
+const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
+  enabled: false,
+  firmName: "",
+  licensedStates: [],
+  practiceAreas: [],
+  conflictNames: [],
+  disclaimer:
+    "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
+  bilingual: true
+};
+
+/** Read the legal-intake settings out of an organization's free-form metadata. */
+function readLegalSettings(metadata: Record<string, unknown> | undefined): LegalIntakeSettings {
+  const raw = metadata && typeof metadata === "object" ? metadata.legalIntake : undefined;
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULT_LEGAL_SETTINGS };
+  }
+  const r = raw as Record<string, unknown>;
+  const list = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
+  return {
+    enabled: r.enabled === true,
+    firmName: typeof r.firmName === "string" ? r.firmName : "",
+    licensedStates: list(r.licensedStates),
+    practiceAreas: list(r.practiceAreas),
+    conflictNames: list(r.conflictNames),
+    disclaimer:
+      typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer : DEFAULT_LEGAL_SETTINGS.disclaimer,
+    bilingual: r.bilingual !== false
+  };
+}
+
+/** Split a comma/newline separated string into a trimmed, non-empty list. */
+function splitList(text: string): string[] {
+  return text
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 const AI_MODE_OPTIONS: Array<{ value: AiReceptionistMode; label: string; hint: string }> = [
   { value: "off", label: "Off", hint: "AI stays out of chats." },
   { value: "suggest", label: "Suggest to agent", hint: "Drafts a reply your agent can send in one click." },
@@ -5090,10 +5164,155 @@ function AiReceptionistCard({
   );
 }
 
+function LegalIntakeCard({
+  settings,
+  onSave
+}: {
+  settings: LegalIntakeSettings;
+  onSave: (next: LegalIntakeSettings) => Promise<boolean>;
+}) {
+  const [enabled, setEnabled] = useState(settings.enabled);
+  const [firmName, setFirmName] = useState(settings.firmName);
+  const [states, setStates] = useState(settings.licensedStates.join(", "));
+  const [areas, setAreas] = useState(settings.practiceAreas.join(", "));
+  const [conflicts, setConflicts] = useState(settings.conflictNames.join("\n"));
+  const [disclaimer, setDisclaimer] = useState(settings.disclaimer);
+  const [bilingual, setBilingual] = useState(settings.bilingual);
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(settings.enabled);
+
+  useEffect(() => {
+    setEnabled(settings.enabled);
+    setFirmName(settings.firmName);
+    setStates(settings.licensedStates.join(", "));
+    setAreas(settings.practiceAreas.join(", "));
+    setConflicts(settings.conflictNames.join("\n"));
+    setDisclaimer(settings.disclaimer);
+    setBilingual(settings.bilingual);
+  }, [settings]);
+
+  async function save() {
+    setSaving(true);
+    await onSave({
+      enabled,
+      firmName: firmName.trim(),
+      licensedStates: splitList(states),
+      practiceAreas: splitList(areas),
+      conflictNames: splitList(conflicts),
+      disclaimer: disclaimer.trim() || DEFAULT_LEGAL_SETTINGS.disclaimer,
+      bilingual
+    });
+    setSaving(false);
+  }
+
+  return (
+    <div className="mb-6 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5">
+      <button
+        className="flex w-full items-center gap-2 text-left"
+        onClick={() => setOpen((v) => !v)}
+        type="button"
+      >
+        <span className="text-lg" aria-hidden>⚖️</span>
+        <h3 className="text-base font-bold">Legal firm mode</h3>
+        <span
+          className={cn(
+            "ml-1 rounded px-2 py-0.5 text-[10px] font-bold",
+            settings.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+          )}
+        >
+          {settings.enabled ? "On" : "Off"}
+        </span>
+        <span className="ml-auto text-xs text-slate-400">{open ? "▲" : "▼"}</span>
+      </button>
+      <p className="mt-1 mb-4 text-sm text-slate-500">
+        Turns the assistant into a compliant legal-intake receptionist: never gives legal advice, shows a
+        disclaimer, and checks conflicts, jurisdiction &amp; time limits.
+      </p>
+
+      {open && (
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input checked={enabled} onChange={(e) => setEnabled(e.target.checked)} type="checkbox" />
+            Enable legal firm mode
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-slate-700">Firm name</span>
+              <input
+                className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-amber-400"
+                onChange={(e) => setFirmName(e.target.value)}
+                placeholder="e.g. Smith & Associates"
+                value={firmName}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-slate-700">Licensed states (comma-separated)</span>
+              <input
+                className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-amber-400"
+                onChange={(e) => setStates(e.target.value)}
+                placeholder="California, Texas"
+                value={states}
+              />
+            </label>
+          </div>
+
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold text-slate-700">Practice areas (comma-separated)</span>
+            <input
+              className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-amber-400"
+              onChange={(e) => setAreas(e.target.value)}
+              placeholder="Personal Injury, Family, Estate, Immigration"
+              value={areas}
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold text-slate-700">
+              Conflict list — opposing parties to flag (one per line)
+            </span>
+            <textarea
+              className="min-h-[70px] w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-400"
+              onChange={(e) => setConflicts(e.target.value)}
+              placeholder={"Acme Corp\nJohn Doe"}
+              value={conflicts}
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold text-slate-700">No-advice disclaimer (shown to visitors)</span>
+            <textarea
+              className="min-h-[70px] w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-400"
+              onChange={(e) => setDisclaimer(e.target.value)}
+              value={disclaimer}
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input checked={bilingual} onChange={(e) => setBilingual(e.target.checked)} type="checkbox" />
+            Reply in English &amp; Spanish
+          </label>
+
+          <button
+            className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-500 disabled:opacity-50"
+            disabled={saving}
+            onClick={() => void save()}
+            type="button"
+          >
+            {saving ? "Saving…" : "Save legal settings"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const CATEGORY_ICON: Record<string, string> = { Website: "🌐", PDF: "📄" };
 
 function KnowledgeHubScreen({
   aiSettings,
+  legalSettings,
+  onSaveLegal,
   articles,
   onCreate,
   onDelete,
@@ -5103,6 +5322,8 @@ function KnowledgeHubScreen({
   onToggle
 }: {
   aiSettings: AiReceptionistSettings;
+  legalSettings: LegalIntakeSettings;
+  onSaveLegal: (next: LegalIntakeSettings) => Promise<boolean>;
   articles: KnowledgeArticle[];
   onCreate: (input: { title: string; content: string; category: string }) => Promise<boolean>;
   onDelete: (id: string) => void;
@@ -5181,6 +5402,8 @@ function KnowledgeHubScreen({
         </div>
 
         <AiReceptionistCard onSave={onSaveAiSettings} settings={aiSettings} />
+
+        <LegalIntakeCard onSave={onSaveLegal} settings={legalSettings} />
 
         <input
           accept="application/pdf,.pdf"

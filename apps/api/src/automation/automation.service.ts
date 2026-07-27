@@ -92,6 +92,18 @@ export class AutomationService {
     body: string,
     options: { isFirstMessage: boolean }
   ): Promise<void> {
+    // Legal firm mode: post the no-attorney-client-relationship disclaimer as the
+    // very first bot message so it is shown AND timestamped (the message's own
+    // createdAt) before any other reply.
+    if (options.isFirstMessage) {
+      const legal = await this.ai.getLegalSettings(organizationId);
+      if (legal.enabled && legal.disclaimer.trim()) {
+        await this.postBotReplyText(organizationId, conversationId, legal.disclaimer.trim(), {
+          legalDisclaimer: true
+        });
+      }
+    }
+
     const rules = await this.prisma.automationRule.findMany({
       where: { organizationId, enabled: true },
       orderBy: [{ isGreeting: "desc" }, { createdAt: "asc" }]

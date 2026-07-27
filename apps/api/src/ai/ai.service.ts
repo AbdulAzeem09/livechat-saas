@@ -39,6 +39,37 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
   tone: "friendly and professional"
 };
 
+/**
+ * Optional "legal firm mode" that turns the receptionist into a compliant legal
+ * intake assistant. Stored on Organization.metadata.legalIntake (no dedicated
+ * table). When disabled the receptionist behaves exactly as before.
+ */
+export interface LegalIntakeSettings {
+  enabled: boolean;
+  firmName: string;
+  /** States/jurisdictions the firm is licensed in (for the jurisdiction check). */
+  licensedStates: string[];
+  /** Practice areas the firm handles (PI, Family, Estate, Immigration, …). */
+  practiceAreas: string[];
+  /** Opposing-party / entity names to flag during conflict pre-screening. */
+  conflictNames: string[];
+  /** No-attorney-client-relationship disclaimer shown + timestamped to visitors. */
+  disclaimer: string;
+  /** Respond in English and Spanish. */
+  bilingual: boolean;
+}
+
+const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
+  enabled: false,
+  firmName: "",
+  licensedStates: [],
+  practiceAreas: [],
+  conflictNames: [],
+  disclaimer:
+    "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
+  bilingual: true
+};
+
 /** Cheap + fast model for drafting short agent reply suggestions. */
 const SUGGESTION_MODEL = "claude-haiku-4-5";
 /** Sentinel the model returns when the knowledge base doesn't cover the question. */
@@ -56,11 +87,65 @@ export class AiService {
   // ---------------------------------------------------------------------------
 
   async getSettings(organizationId: string): Promise<AiSettings> {
+    const metadata = await this.loadOrgMetadata(organizationId);
+    return this.readSettings(metadata);
+  }
+
+  async getLegalSettings(organizationId: string): Promise<LegalIntakeSettings> {
+    const metadata = await this.loadOrgMetadata(organizationId);
+    return this.readLegalSettings(metadata);
+  }
+
+  private async loadOrgMetadata(organizationId: string): Promise<unknown> {
     const org = await this.prisma.organization.findUnique({
       where: { id: organizationId },
       select: { metadata: true }
     });
-    return this.readSettings(org?.metadata);
+    return org?.metadata;
+  }
+
+  private readLegalSettings(metadata: unknown): LegalIntakeSettings {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return { ...DEFAULT_LEGAL_SETTINGS };
+    }
+    const raw = (metadata as Record<string, unknown>).legalIntake;
+    if (!raw || typeof raw !== "object") {
+      return { ...DEFAULT_LEGAL_SETTINGS };
+    }
+    const r = raw as Record<string, unknown>;
+    const strList = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+        : [];
+    return {
+      enabled: r.enabled === true,
+      firmName: typeof r.firmName === "string" ? r.firmName.trim() : DEFAULT_LEGAL_SETTINGS.firmName,
+      licensedStates: strList(r.licensedStates),
+      practiceAreas: strList(r.practiceAreas),
+      conflictNames: strList(r.conflictNames),
+      disclaimer:
+        typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer.trim() : DEFAULT_LEGAL_SETTINGS.disclaimer,
+      bilingual: r.bilingual !== false
+    };
+  }
+
+  /** Build the strict guardrail preamble used whenever legal firm mode is on. */
+  private legalPreamble(legal: LegalIntakeSettings, assistantName: string): string {
+    const firm = legal.firmName || "the law firm";
+    const areas = legal.practiceAreas.length ? legal.practiceAreas.join(", ") : "various practice areas";
+    const states = legal.licensedStates.length ? legal.licensedStates.join(", ") : "the firm's licensed states";
+    return [
+      `You are ${assistantName}, a legal intake assistant for ${firm}. You are NOT an attorney.`,
+      "ABSOLUTE RULES (never break these):",
+      "- NEVER give legal advice, legal opinions, case strategy, or predict outcomes. If the visitor asks a legal question, politely decline and offer to collect their details for an attorney to review.",
+      "- Never state or imply that an attorney-client relationship exists. This chat is intake only.",
+      `- You may only: greet, answer general firm FAQs from the knowledge provided, collect intake details, and offer to connect a human or book a consultation.`,
+      legal.bilingual ? "- Reply in the visitor's language — English or Spanish." : "",
+      `Firm practice areas: ${areas}. Licensed jurisdictions: ${states}.`,
+      "Keep replies short (1-4 sentences), warm, and professional."
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   private readSettings(metadata: unknown): AiSettings {
@@ -92,13 +177,19 @@ export class AiService {
       return { suggestion: this.fallback(messages), usedAI: false, model: null };
     }
 
-    const settings = await this.getSettings(organizationId);
+    const metadata = await this.loadOrgMetadata(organizationId);
+    const settings = this.readSettings(metadata);
+    const legal = this.readLegalSettings(metadata);
     const lastQuestion = this.lastVisitorText(messages);
     const knowledge = await this.retrieveKnowledge(organizationId, lastQuestion);
     const transcript = this.transcript(messages);
 
+    const persona = legal.enabled
+      ? this.legalPreamble(legal, settings.name)
+      : `You are ${settings.name}, a ${settings.tone} customer-support agent.`;
+
     const system = [
-      `You are ${settings.name}, a ${settings.tone} customer-support agent.`,
+      persona,
       "Draft the agent's next reply to the customer in 1-3 short sentences. Be warm and concise.",
       knowledge
         ? `Use ONLY the business knowledge below when it is relevant; do not invent facts.\n\n--- BUSINESS KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
@@ -125,11 +216,34 @@ export class AiService {
 
   async answerFromKnowledge(organizationId: string, question: string): Promise<AiAnswer> {
     const apiKey = this.config.get<string>("ANTHROPIC_API_KEY");
-    const settings = await this.getSettings(organizationId);
+    const metadata = await this.loadOrgMetadata(organizationId);
+    const settings = this.readSettings(metadata);
+    const legal = this.readLegalSettings(metadata);
     const knowledge = await this.retrieveKnowledge(organizationId, question);
 
-    // No knowledge or no AI key → not confident; caller hands off to a human.
-    if (!knowledge || !apiKey) {
+    if (!apiKey) {
+      return { answer: "", confident: false, usedAI: false, model: null };
+    }
+
+    // Legal intake mode: the assistant engages even without matching knowledge
+    // (collecting details is its job) but is hard-guarded against legal advice.
+    if (legal.enabled) {
+      const system = [
+        this.legalPreamble(legal, settings.name),
+        knowledge
+          ? `Use ONLY the firm knowledge below for any factual answer; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
+          : "You have no firm knowledge for this question — do not make anything up; offer to collect details or connect a human.",
+        `If you genuinely cannot help and no human is warranted, reply with EXACTLY: ${UNKNOWN_MARKER}`
+      ].join("\n\n");
+      const text = await this.callClaude(apiKey, system, `Visitor said: ${question}`);
+      if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
+        return { answer: "", confident: false, usedAI: text !== null, model: null };
+      }
+      return { answer: text, confident: true, usedAI: true, model: SUGGESTION_MODEL };
+    }
+
+    // Standard mode: only answer when the knowledge base covers the question.
+    if (!knowledge) {
       return { answer: "", confident: false, usedAI: false, model: null };
     }
 
