@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -22,6 +23,7 @@ import { PermissionsGuard } from "../auth/guards/permissions.guard";
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
 import { BillingService } from "./billing.service";
 import {
+  BillingAddonDto,
   BillingInvoiceDto,
   BillingOverviewDto,
   BillingSubscriptionDto
@@ -63,6 +65,32 @@ export class BillingController {
   @ApiOkResponse({ type: BillingSubscriptionDto })
   cancel(@Param("organizationId") organizationId: string): Promise<BillingSubscriptionDto> {
     return this.billingService.cancel(organizationId);
+  }
+
+  @Post("addons/:code")
+  @Permissions("billing:manage")
+  @ApiOperation({ summary: "Enable a paid add-on for the organization" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "code" })
+  @ApiOkResponse({ type: [BillingAddonDto] })
+  enableAddon(
+    @Param("organizationId") organizationId: string,
+    @Param("code") code: string
+  ): Promise<BillingAddonDto[]> {
+    return this.billingService.setAddon(organizationId, code, true);
+  }
+
+  @Delete("addons/:code")
+  @Permissions("billing:manage")
+  @ApiOperation({ summary: "Disable a paid add-on for the organization" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "code" })
+  @ApiOkResponse({ type: [BillingAddonDto] })
+  disableAddon(
+    @Param("organizationId") organizationId: string,
+    @Param("code") code: string
+  ): Promise<BillingAddonDto[]> {
+    return this.billingService.setAddon(organizationId, code, false);
   }
 
   @Get("invoices")

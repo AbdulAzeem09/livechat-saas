@@ -167,9 +167,18 @@ export interface AcceptJsConfig {
   environment: "sandbox" | "production" | string;
 }
 
+export interface BillingAddon {
+  code: string;
+  name: string;
+  description: string;
+  priceCents: number;
+  active: boolean;
+}
+
 export interface BillingOverview {
   plans: BillingPlan[];
   subscription: BillingSubscription | null;
+  addons: BillingAddon[];
   gatewayConfigured: boolean;
   acceptJs: AcceptJsConfig | null;
 }

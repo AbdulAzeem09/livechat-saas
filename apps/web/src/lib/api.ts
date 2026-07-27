@@ -4,6 +4,7 @@ import type {
   AuthUser,
   AutomationRule,
   ApiKey,
+  BillingAddon,
   BillingInvoice,
   BillingOverview,
   BillingSubscription,
@@ -525,6 +526,18 @@ export function cancelSubscription(
   return apiRequest<BillingSubscription>(`/organizations/${organizationId}/billing/cancel`, {
     accessToken,
     method: "POST"
+  });
+}
+
+export function setBillingAddon(
+  organizationId: string,
+  accessToken: string,
+  code: string,
+  active: boolean
+): Promise<BillingAddon[]> {
+  return apiRequest<BillingAddon[]>(`/organizations/${organizationId}/billing/addons/${code}`, {
+    accessToken,
+    method: active ? "POST" : "DELETE"
   });
 }
 

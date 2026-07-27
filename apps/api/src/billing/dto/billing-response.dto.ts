@@ -1,5 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
+export class BillingAddonDto {
+  @ApiProperty()
+  code!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty()
+  description!: string;
+
+  @ApiProperty()
+  priceCents!: number;
+
+  @ApiProperty({ description: "Whether this add-on is currently active for the organization" })
+  active!: boolean;
+}
+
 export class BillingPlanDto {
   @ApiProperty()
   id!: string;
@@ -113,6 +130,9 @@ export class BillingOverviewDto {
 
   @ApiPropertyOptional({ type: BillingSubscriptionDto, nullable: true })
   subscription!: BillingSubscriptionDto | null;
+
+  @ApiProperty({ type: [BillingAddonDto], description: "Optional paid add-ons and whether each is active" })
+  addons!: BillingAddonDto[];
 
   @ApiProperty({ description: "Whether a real payment gateway (Authorize.net) is configured" })
   gatewayConfigured!: boolean;

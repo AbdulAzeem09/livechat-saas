@@ -7,8 +7,10 @@ import {
   SubscriptionStatus
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { ADDON_CATALOG, activeAddonCodes, findAddon } from "./addons.catalog";
 import { AuthorizeNetService } from "./authorizenet.service";
 import {
+  BillingAddonDto,
   BillingInvoiceDto,
   BillingOverviewDto,
   BillingPlanDto,
@@ -31,17 +33,66 @@ export class BillingService {
   }
 
   async getOverview(organizationId: string): Promise<BillingOverviewDto> {
-    const [plans, subscription] = await Promise.all([
+    const [plans, subscription, addons] = await Promise.all([
       this.listPlans(),
-      this.getCurrentSubscription(organizationId)
+      this.getCurrentSubscription(organizationId),
+      this.listAddons(organizationId)
     ]);
 
     return {
       plans,
       subscription,
+      addons,
       gatewayConfigured: this.gatewayConfigured,
       acceptJs: this.authorizeNet.acceptJsConfig
     };
+  }
+
+  /** The add-on catalog with each marked active/inactive for this organization. */
+  async listAddons(organizationId: string): Promise<BillingAddonDto[]> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { metadata: true }
+    });
+    const active = new Set(activeAddonCodes(org?.metadata));
+    return ADDON_CATALOG.map((addon) => ({
+      code: addon.code,
+      name: addon.name,
+      description: addon.description,
+      priceCents: addon.priceCents,
+      active: active.has(addon.code)
+    }));
+  }
+
+  /**
+   * Enable or disable a paid add-on. In mock mode (no gateway) this just flips
+   * the entitlement flag in organization.metadata.addons; when a real gateway is
+   * wired this is where the add-on charge/subscription would be created.
+   */
+  async setAddon(organizationId: string, code: string, active: boolean): Promise<BillingAddonDto[]> {
+    const addon = findAddon(code);
+    if (!addon) {
+      throw new NotFoundException("Add-on not found");
+    }
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { metadata: true }
+    });
+    const metadata =
+      org?.metadata && typeof org.metadata === "object" && !Array.isArray(org.metadata)
+        ? (org.metadata as Record<string, unknown>)
+        : {};
+    const existing =
+      metadata.addons && typeof metadata.addons === "object" && !Array.isArray(metadata.addons)
+        ? (metadata.addons as Record<string, unknown>)
+        : {};
+    await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: {
+        metadata: { ...metadata, addons: { ...existing, [code]: active } } as Prisma.InputJsonValue
+      }
+    });
+    return this.listAddons(organizationId);
   }
 
   async listPlans(): Promise<BillingPlanDto[]> {

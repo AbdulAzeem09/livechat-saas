@@ -117,8 +117,15 @@ export class AiService {
       Array.isArray(value)
         ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
         : [];
+    // Legal mode only actually engages when BOTH the toggle is on AND the paid
+    // "legal" add-on is active (organization.metadata.addons.legal === true).
+    const addons = (metadata as Record<string, unknown>).addons;
+    const addonActive =
+      !!addons && typeof addons === "object" && !Array.isArray(addons)
+        ? (addons as Record<string, unknown>).legal === true
+        : false;
     return {
-      enabled: r.enabled === true,
+      enabled: r.enabled === true && addonActive,
       firmName: typeof r.firmName === "string" ? r.firmName.trim() : DEFAULT_LEGAL_SETTINGS.firmName,
       licensedStates: strList(r.licensedStates),
       practiceAreas: strList(r.practiceAreas),

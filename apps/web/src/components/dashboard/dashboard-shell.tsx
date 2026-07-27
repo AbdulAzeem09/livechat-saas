@@ -124,6 +124,7 @@ import {
   listMessages,
   listOrganizations,
   refreshAccessToken,
+  setBillingAddon as setBillingAddonRequest,
   setDepartmentAgents as setDepartmentAgentsRequest,
   sendMessage as sendMessageRequest,
   suggestReply as suggestReplyRequest,
@@ -1809,6 +1810,36 @@ export function DashboardShell() {
     }
   }
 
+  async function handleSetAddon(code: string, active: boolean) {
+    if (!session || !activeOrganization) {
+      return;
+    }
+    setIsBillingBusy(true);
+    setError("");
+    try {
+      await setBillingAddonRequest(activeOrganization.id, session.accessToken, code, active);
+      const overview = await getBillingOverview(activeOrganization.id, session.accessToken);
+      setBilling(overview);
+      // Mirror the entitlement into local org metadata so feature gates (e.g. the
+      // Legal firm mode card) unlock/lock immediately without a full reload.
+      setOrganizations((current) =>
+        current.map((org) => {
+          if (org.id !== activeOrganization.id) {
+            return org;
+          }
+          const meta = (org.metadata ?? {}) as Record<string, unknown>;
+          const addons = (meta.addons ?? {}) as Record<string, unknown>;
+          return { ...org, metadata: { ...meta, addons: { ...addons, [code]: active } } };
+        })
+      );
+      setNotice(active ? "Add-on enabled." : "Add-on removed.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to update add-on");
+    } finally {
+      setIsBillingBusy(false);
+    }
+  }
+
   async function handleCreateAutomationRule(input: {
     name: string;
     replyMessage: string;
@@ -2829,9 +2860,11 @@ export function DashboardShell() {
                 <KnowledgeHubScreen
                   aiSettings={readAiSettings(activeOrganization?.metadata)}
                   articles={knowledge}
+                  legalEntitled={hasAddon(activeOrganization?.metadata, "legal")}
                   legalSettings={readLegalSettings(activeOrganization?.metadata)}
                   onCreate={handleCreateKnowledge}
                   onDelete={(id) => void handleDeleteKnowledge(id)}
+                  onGoToBilling={() => setActiveScreen("billing")}
                   onImportPdf={handleImportPdf}
                   onImportWebsite={handleImportWebsite}
                   onSaveAiSettings={handleSaveAiSettings}
@@ -2928,6 +2961,7 @@ export function DashboardShell() {
                   isBusy={isBillingBusy}
                   onCancel={() => void handleCancelSubscription()}
                   onDownloadInvoice={(invoice) => void handleDownloadInvoice(invoice)}
+                  onSetAddon={(code, active) => void handleSetAddon(code, active)}
                   onSubscribe={(planCode) => void handleSubscribe(planCode)}
                 />
               )}
@@ -5046,6 +5080,15 @@ function readLegalSettings(metadata: Record<string, unknown> | undefined): Legal
   };
 }
 
+/** Whether an organization has a given paid add-on active (metadata.addons[code]). */
+function hasAddon(metadata: Record<string, unknown> | undefined, code: string): boolean {
+  const addons = metadata && typeof metadata === "object" ? metadata.addons : undefined;
+  if (!addons || typeof addons !== "object" || Array.isArray(addons)) {
+    return false;
+  }
+  return (addons as Record<string, unknown>)[code] === true;
+}
+
 /** Split a comma/newline separated string into a trimmed, non-empty list. */
 function splitList(text: string): string[] {
   return text
@@ -5166,10 +5209,14 @@ function AiReceptionistCard({
 
 function LegalIntakeCard({
   settings,
-  onSave
+  entitled,
+  onSave,
+  onGoToBilling
 }: {
   settings: LegalIntakeSettings;
+  entitled: boolean;
   onSave: (next: LegalIntakeSettings) => Promise<boolean>;
+  onGoToBilling: () => void;
 }) {
   const [enabled, setEnabled] = useState(settings.enabled);
   const [firmName, setFirmName] = useState(settings.firmName);
@@ -5229,7 +5276,22 @@ function LegalIntakeCard({
         disclaimer, and checks conflicts, jurisdiction &amp; time limits.
       </p>
 
-      {open && (
+      {!entitled && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-100/60 px-4 py-3">
+          <span className="text-sm font-semibold text-amber-800">
+            🔒 This is a paid add-on. Enable it to unlock legal firm mode.
+          </span>
+          <button
+            className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-500"
+            onClick={onGoToBilling}
+            type="button"
+          >
+            Unlock in Billing
+          </button>
+        </div>
+      )}
+
+      {open && entitled && (
         <div className="space-y-3">
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
             <input checked={enabled} onChange={(e) => setEnabled(e.target.checked)} type="checkbox" />
@@ -5312,7 +5374,9 @@ const CATEGORY_ICON: Record<string, string> = { Website: "🌐", PDF: "📄" };
 function KnowledgeHubScreen({
   aiSettings,
   legalSettings,
+  legalEntitled,
   onSaveLegal,
+  onGoToBilling,
   articles,
   onCreate,
   onDelete,
@@ -5323,7 +5387,9 @@ function KnowledgeHubScreen({
 }: {
   aiSettings: AiReceptionistSettings;
   legalSettings: LegalIntakeSettings;
+  legalEntitled: boolean;
   onSaveLegal: (next: LegalIntakeSettings) => Promise<boolean>;
+  onGoToBilling: () => void;
   articles: KnowledgeArticle[];
   onCreate: (input: { title: string; content: string; category: string }) => Promise<boolean>;
   onDelete: (id: string) => void;
@@ -5403,7 +5469,12 @@ function KnowledgeHubScreen({
 
         <AiReceptionistCard onSave={onSaveAiSettings} settings={aiSettings} />
 
-        <LegalIntakeCard onSave={onSaveLegal} settings={legalSettings} />
+        <LegalIntakeCard
+          entitled={legalEntitled}
+          onGoToBilling={onGoToBilling}
+          onSave={onSaveLegal}
+          settings={legalSettings}
+        />
 
         <input
           accept="application/pdf,.pdf"
@@ -8036,6 +8107,7 @@ function BillingScreen({
   isBusy,
   onCancel,
   onDownloadInvoice,
+  onSetAddon,
   onSubscribe
 }: {
   billing: BillingOverview | null;
@@ -8043,6 +8115,7 @@ function BillingScreen({
   isBusy: boolean;
   onCancel: () => void;
   onDownloadInvoice: (invoice: BillingInvoice) => void;
+  onSetAddon: (code: string, active: boolean) => void;
   onSubscribe: (planCode: string) => void;
 }) {
   if (!billing) {
@@ -8056,7 +8129,7 @@ function BillingScreen({
     );
   }
 
-  const { plans, subscription, gatewayConfigured } = billing;
+  const { plans, subscription, gatewayConfigured, addons } = billing;
   const activeCode = subscription && subscription.status === "ACTIVE" ? subscription.planCode : null;
   const isActive = Boolean(subscription && subscription.status === "ACTIVE");
   const planPriceCents = isActive
@@ -8214,6 +8287,61 @@ function BillingScreen({
             );
           })}
         </div>
+
+        {addons.length > 0 && (
+          <>
+            <h2 className="mb-1 mt-10 text-lg font-bold">Add-ons</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Optional paid features you can switch on for your account.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              {addons.map((addon) => (
+                <div
+                  className={cn(
+                    "rounded-xl border p-5",
+                    addon.active ? "border-emerald-300 bg-emerald-50/40" : "border-slate-200"
+                  )}
+                  key={addon.code}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-base font-bold">{addon.name}</h3>
+                    {addon.active && (
+                      <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">{addon.description}</p>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-sm font-bold">
+                      ${(addon.priceCents / 100).toFixed(0)}
+                      <span className="text-xs font-normal text-slate-400">/mo</span>
+                    </span>
+                    {addon.active ? (
+                      <button
+                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        disabled={isBusy}
+                        onClick={() => onSetAddon(addon.code, false)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        className="rounded-lg bg-[#2f6bff] px-4 py-2 text-sm font-bold text-white hover:bg-[#3f78ff] disabled:opacity-50"
+                        disabled={isBusy}
+                        onClick={() => onSetAddon(addon.code, true)}
+                        type="button"
+                      >
+                        {gatewayConfigured ? "Add to plan" : "Enable (test)"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         <h2 className="mb-4 mt-10 text-lg font-bold">Billing history</h2>
         {invoices.length === 0 ? (
