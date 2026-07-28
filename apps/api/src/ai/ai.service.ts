@@ -294,15 +294,32 @@ export class AiService {
       const transcript = this.transcript(messages);
       const system = [
         this.legalPreamble(legal, settings.name),
-        "ALWAYS reply with a helpful message — never stay silent. If this is the start, greet the visitor warmly and briefly say how you can help.",
-        "Progressively collect these intake details across the conversation, asking for only ONE or TWO at a time (don't overwhelm): full name, best contact (phone or email), the type of legal matter, when it happened / key dates, and the other party's name if any.",
+        "ALWAYS reply with a helpful message — never stay silent. If this is the start, greet the visitor warmly, briefly say you'll take down their details so an attorney can review the matter, and ask the first question.",
+        "Your job is a THOROUGH intake interview: keep asking questions, ONE or TWO at a time, until you have gathered ALL of the details below. Do not stop early. Acknowledge each answer briefly, then ask the next missing detail. Never ask for something the visitor already told you.",
+        [
+          "Intake checklist — collect every applicable item:",
+          "1. Full legal name",
+          "2. Best phone number and email, and preferred contact method/time",
+          "3. Type of legal matter / practice area",
+          "4. A clear description of what happened (in their own words)",
+          "5. Key dates — when it happened, and any deadlines or upcoming court dates",
+          "6. Location — the state, county, and city where it happened",
+          "7. The other/opposing party's full name(s) (person or company)",
+          "8. Is there an existing case? If yes: the case/docket number and the court name",
+          "9. Do they currently have, or have they ever had, an attorney on this matter?",
+          "10. Injuries and medical treatment so far, and any insurance involved (for injury/accident matters)",
+          "11. Any documents, police reports, or evidence they have",
+          "12. What outcome or goal they are hoping for"
+        ].join("\n"),
+        "Tailor which items you ask about to the type of matter (e.g. ask about injuries/insurance for a car accident; opposing party and dates for family/estate). Skip items that clearly don't apply.",
+        "You are ONLY collecting information — never analyze the case, never tell them what to do, never predict outcomes, never say whether they have a good case. If they ask for advice, gently say an attorney will review the details, and continue the intake.",
         knowledge
-          ? `Answer general firm questions using ONLY the firm knowledge below; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
-          : "You have no firm knowledge articles yet — do not invent facts; focus on greeting and collecting intake details.",
+          ? `Answer general firm questions (hours, fees, locations) using ONLY the firm knowledge below; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
+          : "You have no firm knowledge articles yet — do not invent facts about the firm; focus on the intake interview.",
         legal.bookingUrl
-          ? `Once you have their name, contact, and a short description of the matter, invite them to book a consultation at ${legal.bookingUrl}.`
-          : "",
-        `Reply with ONLY the message text (no preamble, no quotes). Only if the visitor's message is clearly spam or abuse, reply with EXACTLY: ${UNKNOWN_MARKER}`
+          ? `Once you have collected the key details (at least name, contact, matter type, description, and dates), thank them, let them know an attorney will review everything, and invite them to book a consultation at ${legal.bookingUrl}.`
+          : "Once you have collected the key details, thank them and let them know an attorney will review everything and follow up.",
+        `Keep each reply short (1-3 sentences + the next question). Reply with ONLY the message text (no preamble, no quotes). Only if the visitor's message is clearly spam or abuse, reply with EXACTLY: ${UNKNOWN_MARKER}`
       ]
         .filter(Boolean)
         .join("\n\n");
