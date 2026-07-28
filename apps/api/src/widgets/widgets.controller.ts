@@ -68,6 +68,14 @@ export class WidgetsController {
     return this.widgetsService.getPublicConfig(publicKey, this.getMetadata(request));
   }
 
+  @Get("widgets/public/:publicKey/legal-debug")
+  @Header("access-control-allow-origin", "*")
+  @ApiOperation({ summary: "TEMPORARY: diagnose legal/AI config for a widget's org" })
+  @ApiParam({ name: "publicKey" })
+  getLegalDebug(@Param("publicKey") publicKey: string): Promise<Record<string, unknown>> {
+    return this.widgetsService.getLegalDebug(publicKey);
+  }
+
   @Post("widgets/public/:publicKey/sessions")
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Start a public visitor session for a widget" })

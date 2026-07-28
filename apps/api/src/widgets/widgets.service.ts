@@ -984,6 +984,47 @@ export class WidgetsService {
     };
   }
 
+  /**
+   * TEMPORARY diagnostic: given a widget public key, report exactly what the
+   * server computes for that widget's organization (legal mode, add-on, AI mode,
+   * whether the Anthropic key is configured). Booleans only — no secrets, no firm
+   * details. Used to debug why the AI receptionist / legal mode isn't responding.
+   */
+  async getLegalDebug(publicKey: string): Promise<Record<string, unknown>> {
+    const widget = await this.prisma.chatWidget.findFirst({
+      where: { publicKey },
+      select: { organizationId: true }
+    });
+    if (!widget) {
+      return { found: false };
+    }
+    const org = await this.prisma.organization.findUnique({
+      where: { id: widget.organizationId },
+      select: { metadata: true }
+    });
+    const asRecord = (value: unknown): Record<string, unknown> =>
+      value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    const meta = asRecord(org?.metadata);
+    const legalIntake = asRecord(meta.legalIntake);
+    const addons = asRecord(meta.addons);
+    const aiReceptionist = asRecord(meta.aiReceptionist);
+
+    const legalIntakeEnabled = legalIntake.enabled === true;
+    const addonLegalActive = addons.legal === true;
+    return {
+      found: true,
+      organizationId: widget.organizationId,
+      aiMode: typeof aiReceptionist.mode === "string" ? aiReceptionist.mode : "off",
+      legalIntakeEnabled,
+      addonLegalActive,
+      legalEnabled: legalIntakeEnabled && addonLegalActive,
+      disclaimerConfigured:
+        typeof legalIntake.disclaimer === "string" && legalIntake.disclaimer.trim().length > 0,
+      anthropicKeyConfigured: Boolean((this.config.get<string>("ANTHROPIC_API_KEY") ?? "").trim()),
+      metadataKeys: Object.keys(meta)
+    };
+  }
+
   private mapPublicConfig(widget: ChatWidget): PublicWidgetConfigDto {
     const theme = this.toRecord(widget.theme);
 
