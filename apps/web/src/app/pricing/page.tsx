@@ -13,6 +13,30 @@ interface Plan {
   cta: string;
 }
 
+interface Addon {
+  name: string;
+  blurb: string;
+  monthly: number;
+  features: string[];
+  badge: string;
+}
+
+const ADDONS: Addon[] = [
+  {
+    name: "Legal AI Receptionist",
+    badge: "⚖️ For law firms",
+    blurb: "Add-on for any plan — turns the assistant into a compliant legal-intake receptionist.",
+    monthly: 49,
+    features: [
+      "Never gives legal advice + timestamped disclaimer",
+      "Conflict, jurisdiction & statute-of-limitations checks",
+      "Practice-area intake (PI, family, estate, immigration)",
+      "Bilingual English / Spanish intake",
+      "Human handoff for qualified leads"
+    ]
+  }
+];
+
 const PLANS: Plan[] = [
   {
     name: "Starter",
@@ -148,6 +172,54 @@ export default function PricingPage() {
             </div>
           );
         })}
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 pb-20 md:px-12">
+        <div className="text-center">
+          <p className="text-sm font-bold uppercase tracking-wide text-[#FF5100]">Add-ons</p>
+          <h2 className="mt-2 text-2xl font-bold md:text-3xl">Power up any plan</h2>
+          <p className="mx-auto mt-3 max-w-lg text-sm text-slate-500">
+            Optional industry packs you can switch on from your billing page at any time.
+          </p>
+        </div>
+
+        <div className="mx-auto mt-8 grid max-w-3xl gap-6 md:grid-cols-1">
+          {ADDONS.map((addon) => {
+            const price = annual ? Math.round(addon.monthly * 0.8) : addon.monthly;
+            return (
+              <div
+                className="flex flex-col rounded-2xl border border-slate-200 p-6 md:flex-row md:items-center md:gap-8"
+                key={addon.name}
+              >
+                <div className="md:w-1/2">
+                  <span className="inline-block rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-700">
+                    {addon.badge}
+                  </span>
+                  <h3 className="mt-3 text-xl font-bold">{addon.name}</h3>
+                  <p className="mt-1 text-sm text-slate-500">{addon.blurb}</p>
+                  <div className="mt-4">
+                    <span className="text-4xl font-extrabold">${price}</span>
+                    <span className="text-sm text-slate-500"> /mo per account</span>
+                  </div>
+                  <Link
+                    className="mt-5 inline-block rounded-lg bg-[#111214] px-5 py-2.5 text-center text-sm font-bold text-white hover:bg-black"
+                    href="/register"
+                  >
+                    Start free trial
+                  </Link>
+                </div>
+                <ul className="mt-6 space-y-3 text-sm md:mt-0 md:w-1/2">
+                  {addon.features.map((feature) => (
+                    <li className="flex gap-2 text-slate-600" key={feature}>
+                      <Check className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <footer className="border-t border-slate-100 px-6 py-8 text-center text-sm text-slate-400 md:px-12">
