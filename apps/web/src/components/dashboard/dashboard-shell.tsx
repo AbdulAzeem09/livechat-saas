@@ -7454,6 +7454,30 @@ function ReportsScreen({
             }))}
           />
         </div>
+        {report.legal?.active && (
+          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50/50 p-5">
+            <div className="mb-4 flex items-center gap-2 text-sm font-bold">
+              <span aria-hidden>⚖️</span> Legal intake — last 30 days
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard label="Leads captured" value={report.legal.totalIntakes} />
+              <StatCard label="Qualified leads" value={report.legal.qualifiedLeads} />
+              <StatCard label="After-hours leads" value={report.legal.afterHoursLeads} />
+              <StatCard label="Flagged for review" value={report.legal.flaggedLeads} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-red-100 px-3 py-1 font-semibold text-red-700">
+                ⚠️ Conflict: {report.legal.flags.conflict}
+              </span>
+              <span className="rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-700">
+                📍 Jurisdiction: {report.legal.flags.jurisdiction}
+              </span>
+              <span className="rounded-full bg-orange-100 px-3 py-1 font-semibold text-orange-700">
+                ⏳ Statute of limitations: {report.legal.flags.statute}
+              </span>
+            </div>
+          </div>
+        )}
       </>
     );
   } else if (view === "Chat duration") {

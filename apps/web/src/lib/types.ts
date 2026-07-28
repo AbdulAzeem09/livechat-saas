@@ -343,6 +343,14 @@ export interface ReportSummary {
     conversionRate: number;
     last7Days: Array<{ date: string; total: number }>;
   };
+  legal: {
+    active: boolean;
+    totalIntakes: number;
+    qualifiedLeads: number;
+    afterHoursLeads: number;
+    flaggedLeads: number;
+    flags: { conflict: number; jurisdiction: number; statute: number };
+  };
 }
 
 export interface CannedResponse {

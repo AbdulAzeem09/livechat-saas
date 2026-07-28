@@ -18,6 +18,19 @@ export interface ReportSummary {
     conversionRate: number;
     last7Days: Array<{ date: string; total: number }>;
   };
+  legal: {
+    /** Whether any legal-intake data exists (drives whether the UI shows this). */
+    active: boolean;
+    /** Chats that produced a structured legal intake (last 30 days). */
+    totalIntakes: number;
+    /** Intakes the AI judged a real, qualified legal matter. */
+    qualifiedLeads: number;
+    /** Intakes captured outside 9am–6pm (after-hours leads that would be missed). */
+    afterHoursLeads: number;
+    /** Intakes that produced at least one risk flag. */
+    flaggedLeads: number;
+    flags: { conflict: number; jurisdiction: number; statute: number };
+  };
 }
 
 @Injectable()
@@ -38,7 +51,8 @@ export class ReportsService {
       goodCount,
       badCount,
       salesAggregate,
-      recentSales
+      recentSales,
+      legalConvos
     ] = await Promise.all([
       this.prisma.conversation.count({ where: { organizationId } }),
       this.prisma.message.count({ where: { organizationId } }),
@@ -71,8 +85,19 @@ export class ReportsService {
       this.prisma.sale.findMany({
         where: { organizationId, createdAt: { gte: since } },
         select: { createdAt: true, amountCents: true, currency: true }
+      }),
+      this.prisma.conversation.findMany({
+        where: {
+          organizationId,
+          createdAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) }
+        },
+        select: { createdAt: true, metadata: true },
+        orderBy: { createdAt: "desc" },
+        take: 1000
       })
     ]);
+
+    const legal = this.computeLegalMetrics(legalConvos);
 
     const byStatus: Record<string, number> = {};
     for (const row of grouped) {
@@ -118,7 +143,57 @@ export class ReportsService {
         averageOrderCents,
         conversionRate,
         last7Days: last7DaysSales
+      },
+      legal
+    };
+  }
+
+  /** Aggregate legal-intake analyses stored on conversation.metadata.legalIntake. */
+  private computeLegalMetrics(
+    conversations: Array<{ createdAt: Date; metadata: unknown }>
+  ): ReportSummary["legal"] {
+    let totalIntakes = 0;
+    let qualifiedLeads = 0;
+    let afterHoursLeads = 0;
+    let flaggedLeads = 0;
+    const flags = { conflict: 0, jurisdiction: 0, statute: 0 };
+
+    for (const convo of conversations) {
+      const meta =
+        convo.metadata && typeof convo.metadata === "object" && !Array.isArray(convo.metadata)
+          ? (convo.metadata as Record<string, unknown>)
+          : null;
+      const intake = meta?.legalIntake;
+      if (!intake || typeof intake !== "object") {
+        continue;
       }
+      const analysis = intake as { fields?: { qualified?: boolean }; flags?: Array<{ type?: string }> };
+      totalIntakes += 1;
+      if (analysis.fields?.qualified !== false) {
+        qualifiedLeads += 1;
+      }
+      const hour = convo.createdAt.getHours();
+      if (hour < 9 || hour >= 18) {
+        afterHoursLeads += 1;
+      }
+      const flagList = Array.isArray(analysis.flags) ? analysis.flags : [];
+      if (flagList.length > 0) {
+        flaggedLeads += 1;
+      }
+      for (const flag of flagList) {
+        if (flag?.type === "conflict") flags.conflict += 1;
+        else if (flag?.type === "jurisdiction") flags.jurisdiction += 1;
+        else if (flag?.type === "statute") flags.statute += 1;
+      }
+    }
+
+    return {
+      active: totalIntakes > 0,
+      totalIntakes,
+      qualifiedLeads,
+      afterHoursLeads,
+      flaggedLeads,
+      flags
     };
   }
 
