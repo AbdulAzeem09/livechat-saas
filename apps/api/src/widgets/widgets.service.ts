@@ -1394,6 +1394,18 @@ function buildWidgetScript(): string {
   var apiBase = scriptUrl.origin + scriptUrl.pathname.replace(/\/widget\.js$/, "");
   var socketOrigin = scriptUrl.origin;
   var storagePrefix = "lcw:" + widgetKey + ":";
+  // Testing/demo helper: ?lcwreset=1 in the page URL wipes this widget's saved
+  // session so the chat starts a brand-new conversation.
+  try {
+    if (window.location.search.indexOf("lcwreset=1") !== -1) {
+      var _keys = [];
+      for (var _i = 0; _i < localStorage.length; _i++) {
+        var _k = localStorage.key(_i);
+        if (_k && _k.indexOf(storagePrefix) === 0) _keys.push(_k);
+      }
+      for (var _j = 0; _j < _keys.length; _j++) localStorage.removeItem(_keys[_j]);
+    }
+  } catch (e) {}
   var state = {
     config: null,
     conversationId: localStorage.getItem(storagePrefix + "conversationId") || "",
