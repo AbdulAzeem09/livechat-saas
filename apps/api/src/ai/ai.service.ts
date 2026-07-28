@@ -271,7 +271,11 @@ export class AiService {
   // Visitor-facing: answer a question strictly from the org's knowledge.
   // ---------------------------------------------------------------------------
 
-  async answerFromKnowledge(organizationId: string, question: string): Promise<AiAnswer> {
+  async answerFromKnowledge(
+    organizationId: string,
+    conversationId: string,
+    question: string
+  ): Promise<AiAnswer> {
     const apiKey = this.config.get<string>("ANTHROPIC_API_KEY");
     const metadata = await this.loadOrgMetadata(organizationId);
     const settings = this.readSettings(metadata);
@@ -282,17 +286,31 @@ export class AiService {
       return { answer: "", confident: false, usedAI: false, model: null };
     }
 
-    // Legal intake mode: the assistant engages even without matching knowledge
-    // (collecting details is its job) but is hard-guarded against legal advice.
+    // Legal intake mode: the assistant ALWAYS engages — it greets, answers firm
+    // FAQs from knowledge, and progressively collects intake details. It only
+    // stays silent for clear spam. Hard-guarded against giving legal advice.
     if (legal.enabled) {
+      const messages = await this.recentMessages(organizationId, conversationId);
+      const transcript = this.transcript(messages);
       const system = [
         this.legalPreamble(legal, settings.name),
+        "ALWAYS reply with a helpful message — never stay silent. If this is the start, greet the visitor warmly and briefly say how you can help.",
+        "Progressively collect these intake details across the conversation, asking for only ONE or TWO at a time (don't overwhelm): full name, best contact (phone or email), the type of legal matter, when it happened / key dates, and the other party's name if any.",
         knowledge
-          ? `Use ONLY the firm knowledge below for any factual answer; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
-          : "You have no firm knowledge for this question — do not make anything up; offer to collect details or connect a human.",
-        `If you genuinely cannot help and no human is warranted, reply with EXACTLY: ${UNKNOWN_MARKER}`
-      ].join("\n\n");
-      const text = await this.callClaude(apiKey, system, `Visitor said: ${question}`);
+          ? `Answer general firm questions using ONLY the firm knowledge below; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
+          : "You have no firm knowledge articles yet — do not invent facts; focus on greeting and collecting intake details.",
+        legal.bookingUrl
+          ? `Once you have their name, contact, and a short description of the matter, invite them to book a consultation at ${legal.bookingUrl}.`
+          : "",
+        `Reply with ONLY the message text (no preamble, no quotes). Only if the visitor's message is clearly spam or abuse, reply with EXACTLY: ${UNKNOWN_MARKER}`
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const text = await this.callClaude(
+        apiKey,
+        system,
+        `Conversation so far:\n${transcript || `Customer: ${question}`}\n\nWrite the intake assistant's next reply.`
+      );
       if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
         return { answer: "", confident: false, usedAI: text !== null, model: null };
       }

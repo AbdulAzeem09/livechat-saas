@@ -155,7 +155,7 @@ export class AutomationService {
     const settings = await this.ai.getSettings(organizationId);
 
     if (settings.mode === "auto") {
-      const answer = await this.ai.answerFromKnowledge(organizationId, body);
+      const answer = await this.ai.answerFromKnowledge(organizationId, conversationId, body);
       if (answer.confident && answer.answer.trim()) {
         await this.postBotReplyText(organizationId, conversationId, answer.answer, { ai: true });
       }
