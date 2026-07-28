@@ -4,7 +4,7 @@ import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "../auth/guards/permissions.guard";
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
-import { AiService, AiSuggestion } from "./ai.service";
+import { AiService, AiSuggestion, IntakeAnalysis } from "./ai.service";
 
 @ApiTags("AI")
 @ApiBearerAuth()
@@ -23,5 +23,17 @@ export class AiController {
     @Param("conversationId") conversationId: string
   ): Promise<AiSuggestion> {
     return this.aiService.suggestReply(organizationId, conversationId);
+  }
+
+  @Post("analyze-intake")
+  @Permissions("chat:write")
+  @ApiOperation({ summary: "Run legal intake analysis (conflict / jurisdiction / SOL) for the conversation" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  analyzeIntake(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string
+  ): Promise<IntakeAnalysis | null> {
+    return this.aiService.analyzeIntake(organizationId, conversationId);
   }
 }

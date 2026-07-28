@@ -251,6 +251,107 @@ function readConversationTags(conversation: Conversation | null): string[] {
   return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string") : [];
 }
 
+interface IntakeFlag {
+  type: "conflict" | "jurisdiction" | "statute" | "unqualified";
+  severity: "high" | "medium" | "low";
+  message: string;
+}
+
+interface IntakeAnalysis {
+  fields: {
+    clientName: string | null;
+    contact: string | null;
+    practiceArea: string | null;
+    incidentDate: string | null;
+    opposingParties: string[];
+    state: string | null;
+    summary: string | null;
+    qualified: boolean;
+  };
+  flags: IntakeFlag[];
+  analyzedAt: string;
+}
+
+/** Read the persisted legal-intake analysis from a conversation's metadata. */
+function readIntakeAnalysis(conversation: Conversation | null): IntakeAnalysis | null {
+  if (!conversation || typeof conversation.metadata !== "object" || conversation.metadata === null) {
+    return null;
+  }
+  const raw = (conversation.metadata as Record<string, unknown>).legalIntake;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const a = raw as Record<string, unknown>;
+  if (!a.fields || typeof a.fields !== "object") {
+    return null;
+  }
+  return a as unknown as IntakeAnalysis;
+}
+
+const INTAKE_FLAG_STYLE: Record<IntakeFlag["type"], { icon: string; label: string }> = {
+  conflict: { icon: "⚠️", label: "Conflict" },
+  jurisdiction: { icon: "📍", label: "Jurisdiction" },
+  statute: { icon: "⏳", label: "Statute of limitations" },
+  unqualified: { icon: "🚫", label: "Unqualified" }
+};
+
+/** Agent-facing legal intake summary + conflict / jurisdiction / SOL flags. */
+function LegalIntakePanel({ analysis }: { analysis: IntakeAnalysis }): ReactElement {
+  const { fields, flags } = analysis;
+  const facts: Array<[string, string | null]> = [
+    ["Client", fields.clientName],
+    ["Contact", fields.contact],
+    ["Practice area", fields.practiceArea],
+    ["State", fields.state],
+    ["Incident date", fields.incidentDate],
+    ["Opposing party", fields.opposingParties.length ? fields.opposingParties.join(", ") : null]
+  ];
+  const known = facts.filter(([, value]) => value);
+
+  return (
+    <div className="shrink-0 border-b border-[#303036] bg-[#17171b] px-5 py-3">
+      <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-amber-300/80">
+        <span aria-hidden>⚖️</span> Legal intake
+      </div>
+
+      {flags.length > 0 && (
+        <div className="mb-2 space-y-1.5">
+          {flags.map((flag, index) => (
+            <div
+              className={cn(
+                "flex items-start gap-2 rounded-md px-2.5 py-1.5 text-xs",
+                flag.severity === "high"
+                  ? "bg-red-500/15 text-red-200 ring-1 ring-red-500/30"
+                  : flag.severity === "medium"
+                    ? "bg-amber-500/15 text-amber-100 ring-1 ring-amber-500/30"
+                    : "bg-white/5 text-white/70"
+              )}
+              key={`${flag.type}-${index}`}
+            >
+              <span aria-hidden>{INTAKE_FLAG_STYLE[flag.type]?.icon ?? "•"}</span>
+              <span>
+                <b className="font-bold">{INTAKE_FLAG_STYLE[flag.type]?.label ?? flag.type}:</b> {flag.message}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {known.length > 0 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/70">
+          {known.map(([label, value]) => (
+            <span key={label}>
+              <span className="text-white/40">{label}:</span> {value}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[11px] text-white/40">Collecting intake details…</p>
+      )}
+    </div>
+  );
+}
+
 function agentStatusLabel(agentStatus: string): string {
   switch (agentStatus) {
     case "ONLINE":
@@ -3858,6 +3959,7 @@ function ChatsScreen({
         ? { color: "bg-red-500", label: "Offline" }
         : { color: "bg-amber-400", label: "Connecting" };
   const conversationTags = readConversationTags(selectedConversation);
+  const intakeAnalysis = readIntakeAnalysis(selectedConversation);
   return (
     <div className="grid min-h-full grid-cols-1 bg-[#1f1f23] text-white md:h-full md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden 2xl:grid-cols-[320px_minmax(0,1fr)_340px]">
       <aside className="flex flex-col border-b border-[#111214] bg-[#202024] md:h-full md:min-h-0 md:border-b-0 md:border-r">
@@ -4049,6 +4151,8 @@ function ChatsScreen({
                 + Tag
               </button>
             </div>
+
+            {intakeAnalysis && <LegalIntakePanel analysis={intakeAnalysis} />}
 
             <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
               {isMessagesLoading ? (

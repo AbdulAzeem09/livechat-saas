@@ -70,6 +70,49 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   bilingual: true
 };
 
+/** Structured facts the AI pulls out of a legal-intake conversation. */
+export interface IntakeFields {
+  clientName: string | null;
+  contact: string | null;
+  practiceArea: string | null;
+  /** ISO date (YYYY-MM-DD) of the incident, if the visitor gave one. */
+  incidentDate: string | null;
+  opposingParties: string[];
+  state: string | null;
+  summary: string | null;
+  qualified: boolean;
+}
+
+export interface IntakeFlag {
+  type: "conflict" | "jurisdiction" | "statute" | "unqualified";
+  severity: "high" | "medium" | "low";
+  message: string;
+}
+
+export interface IntakeAnalysis {
+  fields: IntakeFields;
+  flags: IntakeFlag[];
+  analyzedAt: string;
+}
+
+/**
+ * Default statute-of-limitations windows (years from the incident) by practice
+ * area. Deliberately conservative; a firm can override per area via
+ * legalIntake.statuteYears. NOT legal advice — just an intake early-warning.
+ */
+const DEFAULT_STATUTE_YEARS: Record<string, number> = {
+  "personal injury": 2,
+  "medical malpractice": 2,
+  "car accident": 2,
+  "product liability": 2,
+  "wrongful death": 2,
+  "premises liability": 2,
+  defamation: 1,
+  "breach of contract": 4,
+  "property damage": 3,
+  employment: 3
+};
+
 /** Cheap + fast model for drafting short agent reply suggestions. */
 const SUGGESTION_MODEL = "claude-haiku-4-5";
 /** Sentinel the model returns when the knowledge base doesn't cover the question. */
@@ -267,6 +310,181 @@ export class AiService {
       return { answer: "", confident: false, usedAI: text !== null, model: null };
     }
     return { answer: text, confident: true, usedAI: true, model: SUGGESTION_MODEL };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legal intake analysis: extract structured facts + run conflict / jurisdiction
+  // / statute-of-limitations checks. Persisted on conversation.metadata so agents
+  // see it. Deterministic checks in code; only the extraction uses the model.
+  // ---------------------------------------------------------------------------
+
+  async analyzeIntake(organizationId: string, conversationId: string): Promise<IntakeAnalysis | null> {
+    const apiKey = this.config.get<string>("ANTHROPIC_API_KEY");
+    const legal = await this.getLegalSettings(organizationId);
+    if (!apiKey || !legal.enabled) {
+      return null;
+    }
+
+    const messages = await this.recentMessages(organizationId, conversationId);
+    const transcript = this.transcript(messages);
+    if (!transcript.trim()) {
+      return null;
+    }
+
+    const system = [
+      "You extract structured intake facts from a legal intake chat. You are NOT giving legal advice.",
+      "Return ONLY a JSON object (no prose, no code fences) with exactly these keys:",
+      '{"clientName": string|null, "contact": string|null, "practiceArea": string|null, "incidentDate": string|null, "opposingParties": string[], "state": string|null, "summary": string|null, "qualified": boolean}',
+      "- incidentDate must be ISO YYYY-MM-DD or null (infer the year if the visitor gives a relative date; otherwise null).",
+      "- opposingParties: names of the other side(s) mentioned, else [].",
+      "- state: the US state/jurisdiction of the matter if stated, else null.",
+      "- practiceArea: e.g. Personal Injury, Family, Estate, Immigration, Employment — else null.",
+      "- qualified: false only if it's clearly spam or not a legal matter.",
+      "If a field is unknown, use null (or [] for opposingParties). Output JSON only."
+    ].join("\n");
+
+    const raw = await this.callClaude(apiKey, system, `Conversation:\n${transcript}\n\nExtract the JSON.`);
+    const fields = this.parseIntakeFields(raw);
+    if (!fields) {
+      return null;
+    }
+
+    const flags = this.computeIntakeFlags(fields, legal);
+    const analysis: IntakeAnalysis = {
+      fields,
+      flags,
+      analyzedAt: new Date().toISOString()
+    };
+
+    // Persist onto the conversation metadata (merge — never clobber tags etc.).
+    try {
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { id: conversationId, organizationId },
+        select: { metadata: true }
+      });
+      const metadata =
+        conversation?.metadata && typeof conversation.metadata === "object" && !Array.isArray(conversation.metadata)
+          ? (conversation.metadata as Record<string, unknown>)
+          : {};
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { metadata: { ...metadata, legalIntake: analysis } as object }
+      });
+    } catch {
+      // persistence is best-effort; still return the analysis to the caller
+    }
+
+    return analysis;
+  }
+
+  private parseIntakeFields(raw: string | null): IntakeFields | null {
+    if (!raw) {
+      return null;
+    }
+    // Strip code fences / stray text and grab the first {...} block.
+    const match = raw.replace(/```json|```/gi, "").match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    const str = (value: unknown): string | null =>
+      typeof value === "string" && value.trim() ? value.trim() : null;
+    return {
+      clientName: str(parsed.clientName),
+      contact: str(parsed.contact),
+      practiceArea: str(parsed.practiceArea),
+      incidentDate: str(parsed.incidentDate),
+      opposingParties: Array.isArray(parsed.opposingParties)
+        ? parsed.opposingParties.filter((p): p is string => typeof p === "string" && p.trim().length > 0).map((p) => p.trim())
+        : [],
+      state: str(parsed.state),
+      summary: str(parsed.summary),
+      qualified: parsed.qualified !== false
+    };
+  }
+
+  private computeIntakeFlags(fields: IntakeFields, legal: LegalIntakeSettings): IntakeFlag[] {
+    const flags: IntakeFlag[] = [];
+
+    // Conflict pre-screening: opposing party matches the firm's conflict list.
+    for (const opposing of fields.opposingParties) {
+      const hit = legal.conflictNames.find(
+        (name) =>
+          name.toLowerCase().includes(opposing.toLowerCase()) ||
+          opposing.toLowerCase().includes(name.toLowerCase())
+      );
+      if (hit) {
+        flags.push({
+          type: "conflict",
+          severity: "high",
+          message: `Possible conflict: opposing party "${opposing}" matches the firm's conflict list ("${hit}").`
+        });
+      }
+    }
+
+    // Jurisdiction check: matter's state is outside the firm's licensed states.
+    if (fields.state && legal.licensedStates.length > 0) {
+      const licensed = legal.licensedStates.some(
+        (s) => s.toLowerCase() === fields.state!.toLowerCase()
+      );
+      if (!licensed) {
+        flags.push({
+          type: "jurisdiction",
+          severity: "medium",
+          message: `Jurisdiction: matter is in ${fields.state}, outside the firm's licensed states (${legal.licensedStates.join(", ")}).`
+        });
+      }
+    }
+
+    // Statute-of-limitations early warning from the incident date + practice area.
+    if (fields.incidentDate && fields.practiceArea) {
+      const years = this.statuteYearsFor(fields.practiceArea, legal);
+      const incident = new Date(fields.incidentDate);
+      if (years && !Number.isNaN(incident.getTime())) {
+        const deadline = new Date(incident);
+        deadline.setFullYear(deadline.getFullYear() + years);
+        const now = new Date();
+        const daysLeft = Math.round((deadline.getTime() - now.getTime()) / 86400000);
+        if (daysLeft < 0) {
+          flags.push({
+            type: "statute",
+            severity: "high",
+            message: `Statute of limitations may have PASSED: ~${years}yr window from ${fields.incidentDate} ended ${deadline.toISOString().slice(0, 10)}.`
+          });
+        } else if (daysLeft <= 180) {
+          flags.push({
+            type: "statute",
+            severity: "high",
+            message: `Statute of limitations approaching: ~${daysLeft} days left (est. deadline ${deadline.toISOString().slice(0, 10)}).`
+          });
+        }
+      }
+    }
+
+    if (!fields.qualified) {
+      flags.push({ type: "unqualified", severity: "low", message: "Enquiry looks unqualified or off-topic." });
+    }
+
+    return flags;
+  }
+
+  private statuteYearsFor(practiceArea: string, legal: LegalIntakeSettings): number | null {
+    const key = practiceArea.toLowerCase().trim();
+    const override = (legal as unknown as { statuteYears?: Record<string, number> }).statuteYears;
+    if (override && typeof override[key] === "number") {
+      return override[key];
+    }
+    if (typeof DEFAULT_STATUTE_YEARS[key] === "number") {
+      return DEFAULT_STATUTE_YEARS[key];
+    }
+    // Fuzzy: match on a keyword contained in the area name.
+    const found = Object.keys(DEFAULT_STATUTE_YEARS).find((area) => key.includes(area) || area.includes(key));
+    return found ? DEFAULT_STATUTE_YEARS[found]! : null;
   }
 
   // ---------------------------------------------------------------------------

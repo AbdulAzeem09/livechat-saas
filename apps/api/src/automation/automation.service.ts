@@ -133,6 +133,11 @@ export class AutomationService {
     if (!answeredByRule && body.trim().length > 4) {
       await this.maybeAiOrKbReply(organizationId, conversationId, body).catch(() => {});
     }
+
+    // In legal firm mode, re-run intake analysis (conflict / jurisdiction / SOL)
+    // in the background so agents always see fresh flags. No-ops when legal mode
+    // is off or no AI key is configured.
+    void this.ai.analyzeIntake(organizationId, conversationId).catch(() => {});
   }
 
   /**
