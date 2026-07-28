@@ -5153,6 +5153,7 @@ export interface LegalIntakeSettings {
   conflictNames: string[];
   disclaimer: string;
   bilingual: boolean;
+  bookingUrl: string;
 }
 
 const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
@@ -5163,7 +5164,8 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   conflictNames: [],
   disclaimer:
     "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
-  bilingual: true
+  bilingual: true,
+  bookingUrl: ""
 };
 
 /** Read the legal-intake settings out of an organization's free-form metadata. */
@@ -5183,7 +5185,8 @@ function readLegalSettings(metadata: Record<string, unknown> | undefined): Legal
     conflictNames: list(r.conflictNames),
     disclaimer:
       typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer : DEFAULT_LEGAL_SETTINGS.disclaimer,
-    bilingual: r.bilingual !== false
+    bilingual: r.bilingual !== false,
+    bookingUrl: typeof r.bookingUrl === "string" ? r.bookingUrl : ""
   };
 }
 
@@ -5332,6 +5335,7 @@ function LegalIntakeCard({
   const [conflicts, setConflicts] = useState(settings.conflictNames.join("\n"));
   const [disclaimer, setDisclaimer] = useState(settings.disclaimer);
   const [bilingual, setBilingual] = useState(settings.bilingual);
+  const [bookingUrl, setBookingUrl] = useState(settings.bookingUrl);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(settings.enabled);
 
@@ -5343,6 +5347,7 @@ function LegalIntakeCard({
     setConflicts(settings.conflictNames.join("\n"));
     setDisclaimer(settings.disclaimer);
     setBilingual(settings.bilingual);
+    setBookingUrl(settings.bookingUrl);
   }, [settings]);
 
   async function save() {
@@ -5354,7 +5359,8 @@ function LegalIntakeCard({
       practiceAreas: splitList(areas),
       conflictNames: splitList(conflicts),
       disclaimer: disclaimer.trim() || DEFAULT_LEGAL_SETTINGS.disclaimer,
-      bilingual
+      bilingual,
+      bookingUrl: bookingUrl.trim()
     });
     setSaving(false);
   }
@@ -5455,6 +5461,21 @@ function LegalIntakeCard({
               onChange={(e) => setDisclaimer(e.target.value)}
               value={disclaimer}
             />
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold text-slate-700">
+              Consultation booking link (Calendly / Cal.com)
+            </span>
+            <input
+              className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-amber-400"
+              onChange={(e) => setBookingUrl(e.target.value)}
+              placeholder="https://calendly.com/your-firm/consult"
+              value={bookingUrl}
+            />
+            <span className="mt-1 block text-[11px] text-slate-400">
+              The AI offers this to qualified leads to book a consultation.
+            </span>
           </label>
 
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">

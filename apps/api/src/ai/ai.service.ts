@@ -57,6 +57,8 @@ export interface LegalIntakeSettings {
   disclaimer: string;
   /** Respond in English and Spanish. */
   bilingual: boolean;
+  /** Calendly/Cal.com URL the assistant offers qualified leads to book a consult. */
+  bookingUrl: string;
 }
 
 const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
@@ -67,7 +69,8 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   conflictNames: [],
   disclaimer:
     "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
-  bilingual: true
+  bilingual: true,
+  bookingUrl: ""
 };
 
 /** Structured facts the AI pulls out of a legal-intake conversation. */
@@ -175,7 +178,8 @@ export class AiService {
       conflictNames: strList(r.conflictNames),
       disclaimer:
         typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer.trim() : DEFAULT_LEGAL_SETTINGS.disclaimer,
-      bilingual: r.bilingual !== false
+      bilingual: r.bilingual !== false,
+      bookingUrl: typeof r.bookingUrl === "string" ? r.bookingUrl.trim() : ""
     };
   }
 
@@ -190,6 +194,9 @@ export class AiService {
       "- NEVER give legal advice, legal opinions, case strategy, or predict outcomes. If the visitor asks a legal question, politely decline and offer to collect their details for an attorney to review.",
       "- Never state or imply that an attorney-client relationship exists. This chat is intake only.",
       `- You may only: greet, answer general firm FAQs from the knowledge provided, collect intake details, and offer to connect a human or book a consultation.`,
+      legal.bookingUrl
+        ? `- Once you have the visitor's name, contact, and a short description of their matter, invite them to book a consultation at this link: ${legal.bookingUrl}`
+        : "",
       legal.bilingual ? "- Reply in the visitor's language — English or Spanish." : "",
       `Firm practice areas: ${areas}. Licensed jurisdictions: ${states}.`,
       "Keep replies short (1-4 sentences), warm, and professional."
