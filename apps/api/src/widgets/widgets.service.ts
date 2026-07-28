@@ -84,6 +84,9 @@ export class WidgetsService {
       ...(dto.highContrast !== undefined ? { highContrast: dto.highContrast } : {}),
       ...(dto.largeText !== undefined ? { largeText: dto.largeText } : {}),
       ...(dto.cookieConsent !== undefined ? { cookieConsent: dto.cookieConsent } : {}),
+      ...(dto.hidePoweredBy !== undefined ? { hidePoweredBy: dto.hidePoweredBy } : {}),
+      ...(dto.poweredByText !== undefined ? { poweredByText: dto.poweredByText.trim() } : {}),
+      ...(dto.logoUrl !== undefined ? { logoUrl: dto.logoUrl.trim() } : {}),
       ...(dto.emailForwardTo !== undefined ? { emailForwardTo: dto.emailForwardTo.trim() } : {}),
       ...(dto.emailForwardEnabled !== undefined ? { emailForwardEnabled: dto.emailForwardEnabled } : {}),
       ...(dto.workingHoursEnabled !== undefined ? { workingHoursEnabled: dto.workingHoursEnabled } : {}),
@@ -354,7 +357,7 @@ export class WidgetsService {
     await this.mail.send({
       to,
       subject: `New chat: ${subject ?? "Website chat"}`,
-      text: `You received a new chat on ${widget.name}.\n\nFrom: ${who}\n\nMessage:\n${body}\n\nReply from your LiveChat dashboard.`
+      text: `You received a new chat on ${widget.name}.\n\nFrom: ${who}\n\nMessage:\n${body}\n\nReply from your dashboard.`
     });
   }
 
@@ -1002,6 +1005,9 @@ export class WidgetsService {
           : "Thanks for chatting! Anything else we can help with?",
       gtmContainerId: typeof theme.gtmContainerId === "string" ? theme.gtmContainerId : "",
       language: typeof theme.language === "string" ? theme.language : "en",
+      hidePoweredBy: theme.hidePoweredBy === true,
+      poweredByText: typeof theme.poweredByText === "string" ? theme.poweredByText : "",
+      logoUrl: typeof theme.logoUrl === "string" ? theme.logoUrl : "",
       highContrast: theme.highContrast === true,
       largeText: theme.largeText === true,
       cookieConsent: theme.cookieConsent === true,
@@ -1632,6 +1638,23 @@ function buildWidgetScript(): string {
       root.querySelector(".lcw-agent-name").textContent = brand;
       root.querySelector(".lcw-brand-ini").textContent = ini;
       root.querySelector(".lcw-agent-ini").textContent = ini;
+      // White-label: hide or relabel the "Powered by" footer, and optionally show a logo.
+      var powered = root.querySelectorAll(".lcw-powered");
+      for (var pi = 0; pi < powered.length; pi++) {
+        if (config.hidePoweredBy) {
+          powered[pi].style.display = "none";
+        } else if (config.poweredByText) {
+          powered[pi].textContent = config.poweredByText;
+        }
+      }
+      if (config.logoUrl) {
+        var avatars = root.querySelectorAll(".lcw-av");
+        for (var ai = 0; ai < avatars.length; ai++) {
+          avatars[ai].style.background = "#fff center/cover no-repeat url('" + config.logoUrl.replace(/'/g, "") + "')";
+          var initEl = avatars[ai].querySelector("span:not(.lcw-dot)");
+          if (initEl) initEl.style.display = "none";
+        }
+      }
       // Working hours: if enabled and currently offline, show "away" mode.
       var away = config.workingHoursEnabled === true && config.online === false;
       state.away = away;

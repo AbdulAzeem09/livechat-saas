@@ -130,6 +130,23 @@ export class UpdateWidgetDto {
   @IsBoolean()
   cookieConsent?: boolean;
 
+  @ApiPropertyOptional({ description: "White-label: hide the 'Powered by' footer in the widget" })
+  @IsOptional()
+  @IsBoolean()
+  hidePoweredBy?: boolean;
+
+  @ApiPropertyOptional({ maxLength: 60, description: "White-label: custom 'Powered by' text (e.g. your agency name)" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  poweredByText?: string;
+
+  @ApiPropertyOptional({ maxLength: 400, description: "White-label: logo image URL shown in the widget header" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  logoUrl?: string;
+
   @ApiPropertyOptional({ description: "Email new chats to this address (empty to disable)" })
   @IsOptional()
   @IsString()

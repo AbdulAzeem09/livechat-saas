@@ -2477,6 +2477,9 @@ export function DashboardShell() {
     highContrast?: boolean;
     largeText?: boolean;
     cookieConsent?: boolean;
+    hidePoweredBy?: boolean;
+    poweredByText?: string;
+    logoUrl?: string;
     emailForwardTo?: string;
     emailForwardEnabled?: boolean;
     workingHoursEnabled?: boolean;
@@ -8645,6 +8648,9 @@ function SettingsScreen({
     highContrast?: boolean;
     largeText?: boolean;
     cookieConsent?: boolean;
+    hidePoweredBy?: boolean;
+    poweredByText?: string;
+    logoUrl?: string;
     emailForwardTo?: string;
     emailForwardEnabled?: boolean;
     workingHoursEnabled?: boolean;
@@ -8672,6 +8678,9 @@ function SettingsScreen({
   const [accentColor, setAccentColor] = useState("#ff5a00");
   const [position, setPosition] = useState<"left" | "right">("right");
   const [preChatEnabled, setPreChatEnabled] = useState(false);
+  const [hidePoweredBy, setHidePoweredBy] = useState(false);
+  const [poweredByText, setPoweredByText] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [openSetting, setOpenSetting] = useState<string | null>(null);
 
@@ -8686,12 +8695,25 @@ function SettingsScreen({
     setAccentColor(config.theme?.accentColor ?? "#ff5a00");
     setPosition(config.theme?.position ?? "right");
     setPreChatEnabled(config.preChatEnabled ?? false);
+    setHidePoweredBy(config.hidePoweredBy ?? false);
+    setPoweredByText(config.poweredByText ?? "");
+    setLogoUrl(config.logoUrl ?? "");
   }, [config]);
 
   async function saveWidget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSaving(true);
-    await onUpdateWidget({ name, welcomeMessage, offlineMessage, accentColor, position, preChatEnabled });
+    await onUpdateWidget({
+      name,
+      welcomeMessage,
+      offlineMessage,
+      accentColor,
+      position,
+      preChatEnabled,
+      hidePoweredBy,
+      poweredByText,
+      logoUrl
+    });
     setIsSaving(false);
   }
 
@@ -8850,6 +8872,35 @@ function SettingsScreen({
             </select>
           </label>
         </div>
+
+        <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+          <p className="text-sm font-bold text-slate-700">White-label branding</p>
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold text-slate-600">Logo URL (widget header)</span>
+            <input
+              className="h-9 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-[#0067ff]"
+              onChange={(event) => setLogoUrl(event.target.value)}
+              placeholder="https://yourbrand.com/logo.png"
+              value={logoUrl}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input checked={hidePoweredBy} onChange={(event) => setHidePoweredBy(event.target.checked)} type="checkbox" />
+            Hide the “Powered by” footer
+          </label>
+          {!hidePoweredBy && (
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-slate-600">Custom footer text</span>
+              <input
+                className="h-9 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-[#0067ff]"
+                onChange={(event) => setPoweredByText(event.target.value)}
+                placeholder="Powered by Your Agency"
+                value={poweredByText}
+              />
+            </label>
+          )}
+        </div>
+
         <button
           className="rounded-md bg-[#0067ff] px-5 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-60"
           disabled={isSaving}

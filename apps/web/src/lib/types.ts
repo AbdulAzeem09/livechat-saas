@@ -414,6 +414,9 @@ export interface WidgetInstall {
     highContrast?: boolean;
     largeText?: boolean;
     cookieConsent?: boolean;
+    hidePoweredBy?: boolean;
+    poweredByText?: string;
+    logoUrl?: string;
   };
 }
 

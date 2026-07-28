@@ -1037,6 +1037,9 @@ export function updateWidgetInstall(
     highContrast?: boolean;
     largeText?: boolean;
     cookieConsent?: boolean;
+    hidePoweredBy?: boolean;
+    poweredByText?: string;
+    logoUrl?: string;
     emailForwardTo?: string;
     emailForwardEnabled?: boolean;
     workingHoursEnabled?: boolean;

@@ -52,6 +52,15 @@ export class PublicWidgetConfigDto {
   @ApiProperty({ description: "Widget UI language code" })
   language!: string;
 
+  @ApiProperty({ description: "White-label: hide the 'Powered by' footer" })
+  hidePoweredBy!: boolean;
+
+  @ApiProperty({ description: "White-label: custom 'Powered by' text (empty = default)" })
+  poweredByText!: string;
+
+  @ApiProperty({ description: "White-label: logo image URL for the widget header (empty = none)" })
+  logoUrl!: string;
+
   @ApiProperty({ description: "High-contrast colors" })
   highContrast!: boolean;
 
