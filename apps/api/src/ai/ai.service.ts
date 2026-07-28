@@ -19,6 +19,8 @@ export interface AiAnswer {
   confident: boolean;
   usedAI: boolean;
   model: string | null;
+  /** True when the visitor asked for a human — the AI should stop and hand off. */
+  handoff: boolean;
 }
 
 /** How the AI receptionist behaves for an organization. */
@@ -120,6 +122,8 @@ const DEFAULT_STATUTE_YEARS: Record<string, number> = {
 const SUGGESTION_MODEL = "claude-haiku-4-5";
 /** Sentinel the model returns when the knowledge base doesn't cover the question. */
 const UNKNOWN_MARKER = "[[NO_ANSWER]]";
+/** Sentinel the model appends when the visitor asks to speak with a human. */
+const HANDOFF_MARKER = "[[HANDOFF]]";
 
 @Injectable()
 export class AiService {
@@ -283,7 +287,7 @@ export class AiService {
     const knowledge = await this.retrieveKnowledge(organizationId, question);
 
     if (!apiKey) {
-      return { answer: "", confident: false, usedAI: false, model: null };
+      return { answer: "", confident: false, usedAI: false, model: null, handoff: false };
     }
 
     // Legal intake mode: the assistant ALWAYS engages — it greets, answers firm
@@ -313,6 +317,7 @@ export class AiService {
         ].join("\n"),
         "Tailor which items you ask about to the type of matter (e.g. ask about injuries/insurance for a car accident; opposing party and dates for family/estate). Skip items that clearly don't apply.",
         "You are ONLY collecting information — never analyze the case, never tell them what to do, never predict outcomes, never say whether they have a good case. If they ask for advice, gently say an attorney will review the details, and continue the intake.",
+        `If the visitor asks to speak with a human, a live agent, a real person, a representative, or an attorney directly (or says they don't want to answer more questions), STOP the intake. Reply briefly and warmly that you're connecting them with a team member who will follow up shortly, and end your entire message with the token ${HANDOFF_MARKER}`,
         knowledge
           ? `Answer general firm questions (hours, fees, locations) using ONLY the firm knowledge below; never invent facts.\n--- FIRM KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
           : "You have no firm knowledge articles yet — do not invent facts about the firm; focus on the intake interview.",
@@ -329,14 +334,16 @@ export class AiService {
         `Conversation so far:\n${transcript || `Customer: ${question}`}\n\nWrite the intake assistant's next reply.`
       );
       if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
-        return { answer: "", confident: false, usedAI: text !== null, model: null };
+        return { answer: "", confident: false, usedAI: text !== null, model: null, handoff: false };
       }
-      return { answer: text, confident: true, usedAI: true, model: SUGGESTION_MODEL };
+      const handoff = text.includes(HANDOFF_MARKER);
+      const clean = text.replace(HANDOFF_MARKER, "").trim();
+      return { answer: clean, confident: clean.length > 0, usedAI: true, model: SUGGESTION_MODEL, handoff };
     }
 
     // Standard mode: only answer when the knowledge base covers the question.
     if (!knowledge) {
-      return { answer: "", confident: false, usedAI: false, model: null };
+      return { answer: "", confident: false, usedAI: false, model: null, handoff: false };
     }
 
     const system = [
@@ -349,9 +356,9 @@ export class AiService {
 
     const text = await this.callClaude(apiKey, system, `Visitor's question: ${question}`);
     if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
-      return { answer: "", confident: false, usedAI: text !== null, model: null };
+      return { answer: "", confident: false, usedAI: text !== null, model: null, handoff: false };
     }
-    return { answer: text, confident: true, usedAI: true, model: SUGGESTION_MODEL };
+    return { answer: text, confident: true, usedAI: true, model: SUGGESTION_MODEL, handoff: false };
   }
 
   // ---------------------------------------------------------------------------

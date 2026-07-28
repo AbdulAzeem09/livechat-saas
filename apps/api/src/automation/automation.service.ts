@@ -155,9 +155,19 @@ export class AutomationService {
     const settings = await this.ai.getSettings(organizationId);
 
     if (settings.mode === "auto") {
+      // Once a human has been requested, the AI steps back and lets an agent take over.
+      if (await this.isAiPaused(organizationId, conversationId)) {
+        return;
+      }
       const answer = await this.ai.answerFromKnowledge(organizationId, conversationId, body);
       if (answer.confident && answer.answer.trim()) {
-        await this.postBotReplyText(organizationId, conversationId, answer.answer, { ai: true });
+        await this.postBotReplyText(organizationId, conversationId, answer.answer, {
+          ai: true,
+          ...(answer.handoff ? { handoff: true } : {})
+        });
+      }
+      if (answer.handoff) {
+        await this.pauseAiForHuman(organizationId, conversationId);
       }
       return;
     }
@@ -214,6 +224,41 @@ export class AutomationService {
     rule: AutomationRule
   ): Promise<void> {
     await this.postBotReplyText(organizationId, conversationId, rule.replyMessage, { ruleId: rule.id });
+  }
+
+  /** Has the AI already handed this conversation to a human? */
+  private async isAiPaused(organizationId: string, conversationId: string): Promise<boolean> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { metadata: true }
+    });
+    const meta =
+      conversation?.metadata && typeof conversation.metadata === "object" && !Array.isArray(conversation.metadata)
+        ? (conversation.metadata as Record<string, unknown>)
+        : {};
+    return meta.aiPaused === true;
+  }
+
+  /** Pause the AI and flag the conversation so a human agent picks it up. */
+  private async pauseAiForHuman(organizationId: string, conversationId: string): Promise<void> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { metadata: true }
+    });
+    const meta =
+      conversation?.metadata && typeof conversation.metadata === "object" && !Array.isArray(conversation.metadata)
+        ? (conversation.metadata as Record<string, unknown>)
+        : {};
+    const tags = Array.isArray(meta.tags)
+      ? meta.tags.filter((t): t is string => typeof t === "string")
+      : [];
+    if (!tags.includes("needs human")) {
+      tags.push("needs human");
+    }
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { metadata: { ...meta, aiPaused: true, tags } as Prisma.InputJsonValue }
+    });
   }
 
   private async postBotReplyText(
