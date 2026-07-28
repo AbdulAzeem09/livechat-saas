@@ -1025,6 +1025,47 @@ export class WidgetsService {
     };
   }
 
+  /** TEMPORARY diagnostic: ping the Anthropic API to prove the key + model work. */
+  async getAiPing(): Promise<Record<string, unknown>> {
+    const apiKey = (this.config.get<string>("ANTHROPIC_API_KEY") ?? "").trim();
+    if (!apiKey) {
+      return { keyPresent: false };
+    }
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          max_tokens: 16,
+          messages: [{ role: "user", content: "Reply with the single word: OK" }]
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const raw = await response.text();
+      let sample = "";
+      try {
+        const data = JSON.parse(raw) as { content?: Array<{ text?: string }>; error?: { message?: string } };
+        sample = data.content?.[0]?.text ?? data.error?.message ?? "";
+      } catch {
+        sample = raw.slice(0, 200);
+      }
+      return {
+        keyPresent: true,
+        httpStatus: response.status,
+        ok: response.ok,
+        keyPrefix: apiKey.slice(0, 8),
+        sample: sample.slice(0, 200)
+      };
+    } catch (error) {
+      return { keyPresent: true, ok: false, fetchError: String((error as Error)?.message ?? error) };
+    }
+  }
+
   private mapPublicConfig(widget: ChatWidget): PublicWidgetConfigDto {
     const theme = this.toRecord(widget.theme);
 

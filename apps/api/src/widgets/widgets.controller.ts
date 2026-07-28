@@ -76,6 +76,13 @@ export class WidgetsController {
     return this.widgetsService.getLegalDebug(publicKey);
   }
 
+  @Get("widgets/public/ai-ping")
+  @Header("access-control-allow-origin", "*")
+  @ApiOperation({ summary: "TEMPORARY: prove the Anthropic API key + model actually work" })
+  getAiPing(): Promise<Record<string, unknown>> {
+    return this.widgetsService.getAiPing();
+  }
+
   @Post("widgets/public/:publicKey/sessions")
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Start a public visitor session for a widget" })
