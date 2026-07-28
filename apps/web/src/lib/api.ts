@@ -529,6 +529,14 @@ export function cancelSubscription(
   });
 }
 
+export function provisionClientOrg(accessToken: string, name: string): Promise<Organization> {
+  return apiRequest<Organization>("/organizations", {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ name })
+  });
+}
+
 export function setBillingAddon(
   organizationId: string,
   accessToken: string,

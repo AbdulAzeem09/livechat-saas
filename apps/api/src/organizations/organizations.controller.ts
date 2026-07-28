@@ -27,6 +27,7 @@ import {
   OrganizationDto,
   OrganizationMemberDto
 } from "./dto/organization-response.dto";
+import { ProvisionClientDto } from "./dto/provision-client.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
 import { UpdateOrganizationDto } from "./dto/update-organization.dto";
 import { OrganizationAccessGuard } from "./guards/organization-access.guard";
@@ -45,6 +46,17 @@ export class OrganizationsController {
   @ApiOkResponse({ type: [OrganizationDto] })
   listOrganizations(@CurrentUser() user: AuthUser): Promise<OrganizationDto[]> {
     return this.organizationsService.listForUser(user);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: "Provision a new client firm (reseller self-serve) owned by the current user" })
+  @ApiCreatedResponse({ type: OrganizationDto })
+  provisionClient(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProvisionClientDto
+  ): Promise<OrganizationDto> {
+    return this.organizationsService.provisionClient(user, dto);
   }
 
   @Get(":organizationId")

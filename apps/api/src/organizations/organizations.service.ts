@@ -5,7 +5,8 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import { Prisma, UserStatus } from "@prisma/client";
+import { Prisma, RoleKey, UserStatus } from "@prisma/client";
+import { OWNER_PERMISSIONS } from "../auth/auth.constants";
 import type { AuthUser } from "../auth/types/auth-user";
 import { PrismaService } from "../prisma/prisma.service";
 import type { OrganizationRequestContext } from "./types/organization-context";
@@ -63,6 +64,106 @@ export class OrganizationsService {
         ...(membership ? { membership } : {})
       };
     });
+  }
+
+  /**
+   * Reseller self-serve: provision a brand-new client firm owned by the current
+   * user, pre-configured with the Legal add-on enabled + legal firm mode on. Lets
+   * an agency spin up a law-firm tenant without contacting us.
+   */
+  async provisionClient(user: AuthUser, input: { name: string }): Promise<OrganizationDto> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new BadRequestException("A firm name is required");
+    }
+    const baseSlug = this.slugifyName(name);
+    const slug = `${baseSlug}-${randomBytes(3).toString("hex")}`;
+
+    const widgetSecret = randomBytes(24).toString("base64url");
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const organization = await transaction.organization.create({
+        data: {
+          name,
+          slug,
+          status: "TRIALING",
+          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          metadata: {
+            addons: { legal: true },
+            legalIntake: { enabled: true, firmName: name },
+            provisionedBy: user.userId
+          } as Prisma.InputJsonValue
+        }
+      });
+
+      await transaction.chatWidget.create({
+        data: {
+          organizationId: organization.id,
+          name,
+          publicKey: `lcw_${randomBytes(18).toString("base64url")}`,
+          secretHash: createHash("sha256").update(widgetSecret).digest("hex"),
+          welcomeMessage: "Hi there. How can we help?",
+          offlineMessage: "Leave a message and the team will reply soon.",
+          theme: { accentColor: "#2f6bff", position: "right" }
+        }
+      });
+
+      const ownerRole = await transaction.role.create({
+        data: {
+          organizationId: organization.id,
+          key: RoleKey.OWNER,
+          name: "Owner",
+          description: "Full organization access",
+          permissions: [...OWNER_PERMISSIONS],
+          isSystem: true
+        }
+      });
+
+      const membership = await transaction.userOrganization.create({
+        data: {
+          organizationId: organization.id,
+          userId: user.userId,
+          displayName: user.email,
+          status: UserStatus.ACTIVE
+        }
+      });
+
+      await transaction.userRole.create({
+        data: {
+          organizationId: organization.id,
+          membershipId: membership.id,
+          roleId: ownerRole.id
+        }
+      });
+
+      return { organization, membership };
+    });
+
+    return {
+      ...this.mapOrganization(result.organization),
+      membership: {
+        id: result.membership.id,
+        organizationId: result.membership.organizationId,
+        userId: result.membership.userId,
+        displayName: result.membership.displayName,
+        title: result.membership.title,
+        timezone: result.membership.timezone,
+        status: result.membership.status,
+        agentStatus: result.membership.agentStatus,
+        maxOpenChats: result.membership.maxOpenChats,
+        roles: [RoleKey.OWNER],
+        permissions: [...OWNER_PERMISSIONS]
+      }
+    };
+  }
+
+  private slugifyName(name: string): string {
+    return (
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "firm"
+    );
   }
 
   async getOrganization(

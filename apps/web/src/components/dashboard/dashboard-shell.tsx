@@ -123,6 +123,7 @@ import {
   listMembers,
   listMessages,
   listOrganizations,
+  provisionClientOrg as provisionClientOrgRequest,
   refreshAccessToken,
   setBillingAddon as setBillingAddonRequest,
   setDepartmentAgents as setDepartmentAgentsRequest,
@@ -286,6 +287,65 @@ function readIntakeAnalysis(conversation: Conversation | null): IntakeAnalysis |
     return null;
   }
   return a as unknown as IntakeAnalysis;
+}
+
+/** Reseller/agency bar: switch between the client firms you own + provision a new one. */
+function AgencyBar({
+  organizations,
+  activeOrganizationId,
+  isLight,
+  onSwitch,
+  onProvision
+}: {
+  organizations: Organization[];
+  activeOrganizationId: string | null;
+  isLight: boolean;
+  onSwitch: (id: string) => void;
+  onProvision: (name: string) => void;
+}): ReactElement {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs",
+        isLight ? "border-slate-200 bg-slate-50 text-slate-600" : "border-[#2d2d32] bg-[#17171b] text-white/70"
+      )}
+    >
+      <span className="font-semibold uppercase tracking-wide opacity-60">🏢 Agency</span>
+      {organizations.length > 1 && (
+        <select
+          aria-label="Switch client firm"
+          className={cn(
+            "rounded-md border px-2 py-1 text-xs outline-none",
+            isLight ? "border-slate-300 bg-white" : "border-[#3a3a42] bg-[#26262b] text-white"
+          )}
+          onChange={(event) => onSwitch(event.target.value)}
+          value={activeOrganizationId ?? ""}
+        >
+          {organizations.map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        className={cn(
+          "rounded-md px-3 py-1 text-xs font-bold",
+          isLight ? "bg-[#2f6bff] text-white hover:bg-[#3f78ff]" : "bg-[#2f6bff] text-white hover:bg-[#3f78ff]"
+        )}
+        onClick={() => {
+          const name = window.prompt("New client firm name (e.g. Smith & Associates):");
+          if (name && name.trim()) {
+            onProvision(name.trim());
+          }
+        }}
+        type="button"
+      >
+        + New client firm
+      </button>
+      <span className="opacity-50">Legal mode is auto-enabled for new firms.</span>
+    </div>
+  );
 }
 
 const INTAKE_FLAG_STYLE: Record<IntakeFlag["type"], { icon: string; label: string }> = {
@@ -593,6 +653,7 @@ export function DashboardShell() {
   const [session, setSession] = useState<StoredSession | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [widgetInstall, setWidgetInstall] = useState<WidgetInstall | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [members, setMembers] = useState<OrganizationMember[]>([]);
@@ -745,7 +806,7 @@ export function DashboardShell() {
   }, []);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "reports" && activeScreen !== "overview") {
       return;
@@ -768,10 +829,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "engage" && activeScreen !== "overview") {
       return;
@@ -816,10 +877,10 @@ export function DashboardShell() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "engage") {
       return;
@@ -844,10 +905,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "apps") {
       return;
@@ -872,10 +933,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "tickets") {
       return;
@@ -898,10 +959,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "team") {
       return;
@@ -924,10 +985,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "billing") {
       return;
@@ -958,10 +1019,10 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
-    const organizationId = organizations[0]?.id;
+    const organizationId = organizations.find((org) => org.id === activeOrgId)?.id ?? organizations[0]?.id;
 
     if (activeScreen !== "automate") {
       return;
@@ -992,7 +1053,7 @@ export function DashboardShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeScreen, session?.accessToken, organizations]);
+  }, [activeScreen, session?.accessToken, organizations, activeOrgId]);
 
   useEffect(() => {
     // Browsers block audio until the user interacts; unlock the chime on first gesture.
@@ -1044,7 +1105,10 @@ export function DashboardShell() {
     setIsMobileMenuOpen(false);
   }, [activeScreen]);
 
-  const activeOrganization = organizations[0];
+  // The active org is the first by default, but a reseller can switch between the
+  // client firms they own via the org switcher (setActiveOrgId).
+  const activeOrganization =
+    organizations.find((org) => org.id === activeOrgId) ?? organizations[0];
 
   // Being in the dashboard means you're online — flip the agent ONLINE once on load
   // so the Team "Login status" and auto-routing reflect reality (was stuck "Offline").
@@ -1908,6 +1972,21 @@ export function DashboardShell() {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to cancel");
     } finally {
       setIsBillingBusy(false);
+    }
+  }
+
+  async function handleProvisionClient(name: string) {
+    if (!session || !name.trim()) {
+      return;
+    }
+    setError("");
+    try {
+      const created = await provisionClientOrgRequest(session.accessToken, name.trim());
+      setOrganizations((current) => [...current, created]);
+      setActiveOrgId(created.id);
+      setNotice(`Client firm "${created.name}" created — legal mode is on. Switched to it.`);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to create client firm");
     }
   }
 
@@ -2852,6 +2931,16 @@ export function DashboardShell() {
                   <X className="h-3.5 w-3.5" aria-hidden />
                 </button>
               </div>
+            )}
+
+            {(organizations.length > 1 || activeScreen === "billing") && (
+              <AgencyBar
+                activeOrganizationId={activeOrganization?.id ?? null}
+                isLight={isLightScreen}
+                onProvision={(name) => void handleProvisionClient(name)}
+                onSwitch={setActiveOrgId}
+                organizations={organizations}
+              />
             )}
 
             <div className="lc-fade-in lc-scroll min-h-0 flex-1 overflow-auto" key={activeScreen}>
