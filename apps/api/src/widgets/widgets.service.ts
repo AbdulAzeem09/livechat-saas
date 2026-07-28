@@ -2047,6 +2047,13 @@ function buildWidgetScript(): string {
           renderMessage(result.message);
           trackGtm("livechat_conversation_started");
           if (state.socket) state.socket.emit("conversation.join", { conversationId: state.conversationId });
+          // The server may post bot replies (disclaimer / AI receptionist) while
+          // creating the conversation — before we joined the room — so those
+          // broadcasts are missed. Fetch history to catch them (renderMessage
+          // dedupes by id); refetch shortly after in case the AI reply lands late.
+          loadHistory();
+          setTimeout(loadHistory, 1500);
+          setTimeout(loadHistory, 4000);
         });
       }
 
