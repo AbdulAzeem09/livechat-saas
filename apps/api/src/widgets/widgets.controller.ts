@@ -83,6 +83,14 @@ export class WidgetsController {
     return this.widgetsService.getAiPing();
   }
 
+  @Get("widgets/public/:publicKey/messages-debug")
+  @Header("access-control-allow-origin", "*")
+  @ApiOperation({ summary: "TEMPORARY: dump the latest conversation's messages for a widget's org" })
+  @ApiParam({ name: "publicKey" })
+  getMessagesDebug(@Param("publicKey") publicKey: string): Promise<Record<string, unknown>> {
+    return this.widgetsService.getMessagesDebug(publicKey);
+  }
+
   @Post("widgets/public/:publicKey/sessions")
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Start a public visitor session for a widget" })

@@ -1025,6 +1025,42 @@ export class WidgetsService {
     };
   }
 
+  /** TEMPORARY diagnostic: dump the latest conversation's messages for a widget's org. */
+  async getMessagesDebug(publicKey: string): Promise<Record<string, unknown>> {
+    const widget = await this.prisma.chatWidget.findFirst({
+      where: { publicKey },
+      select: { organizationId: true }
+    });
+    if (!widget) {
+      return { found: false };
+    }
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { organizationId: widget.organizationId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, createdAt: true }
+    });
+    if (!conversation) {
+      return { found: true, conversation: null };
+    }
+    const messages = await this.prisma.message.findMany({
+      where: { organizationId: widget.organizationId, conversationId: conversation.id },
+      orderBy: { createdAt: "asc" },
+      select: { senderType: true, type: true, body: true, metadata: true, createdAt: true }
+    });
+    return {
+      found: true,
+      organizationId: widget.organizationId,
+      conversationId: conversation.id,
+      messageCount: messages.length,
+      messages: messages.map((m) => ({
+        senderType: m.senderType,
+        type: m.type,
+        body: (m.body ?? "").slice(0, 140),
+        meta: m.metadata
+      }))
+    };
+  }
+
   /** TEMPORARY diagnostic: ping the Anthropic API to prove the key + model work. */
   async getAiPing(): Promise<Record<string, unknown>> {
     const apiKey = (this.config.get<string>("ANTHROPIC_API_KEY") ?? "").trim();
