@@ -5254,7 +5254,7 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   conflictNames: [],
   disclaimer:
     "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
-  showDisclaimer: true,
+  showDisclaimer: false,
   bilingual: true,
   bookingUrl: ""
 };
@@ -5276,7 +5276,7 @@ function readLegalSettings(metadata: Record<string, unknown> | undefined): Legal
     conflictNames: list(r.conflictNames),
     disclaimer:
       typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer : DEFAULT_LEGAL_SETTINGS.disclaimer,
-    showDisclaimer: r.showDisclaimer !== false,
+    showDisclaimer: r.showDisclaimer === true,
     bilingual: r.bilingual !== false,
     bookingUrl: typeof r.bookingUrl === "string" ? r.bookingUrl : ""
   };
