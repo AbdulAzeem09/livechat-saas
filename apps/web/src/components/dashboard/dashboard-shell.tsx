@@ -600,13 +600,6 @@ const appCards = [
   }
 ];
 
-const chatToolItems: Array<{ icon: IconComponent; label: string }> = [
-  { label: "Message sneak-peek", icon: MousePointer2 },
-  { label: "Canned responses", icon: MessageSquareText },
-  { label: "Chat transfer", icon: ArrowRight },
-  { label: "Chat ratings", icon: ThumbsUp }
-];
-
 const settingsIntegrations: Array<{ icon: IconComponent; label: string }> = [
   { label: "Forms builder", icon: ClipboardList },
   { label: "Banned visitors", icon: Ban },
@@ -4398,21 +4391,118 @@ function ChatsScreen({
         </div>
 
         <div className="space-y-6 px-5 py-6">
-          <SkeletonLines />
+          <div className="rounded-lg border border-[#303036] p-4">
+            <p className="text-sm font-bold">Conversation</p>
+            {selectedConversation ? (
+              <div className="mt-3 space-y-1.5 text-sm text-white/75">
+                <div>
+                  <span className="text-white/40">Subject:</span> {selectedConversation.subject || "Website chat"}
+                </div>
+                <div>
+                  <span className="text-white/40">Status:</span> {selectedConversation.status}
+                </div>
+                <div>
+                  <span className="text-white/40">Assigned:</span>{" "}
+                  {members.find((m) => m.id === selectedConversation.assignedAgentId)?.name ||
+                    members.find((m) => m.id === selectedConversation.assignedAgentId)?.email ||
+                    "Unassigned"}
+                </div>
+                {readConversationTags(selectedConversation).length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {readConversationTags(selectedConversation).map((tag) => (
+                      <span className="rounded-full bg-[#2a2a30] px-2 py-0.5 text-xs" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-white/40">Open a chat to see its details.</p>
+            )}
+          </div>
+
           <div className="rounded-lg border border-[#303036] p-4">
             <p className="text-sm font-bold">Chat tools</p>
             <div className="mt-3 grid gap-2">
-              {chatToolItems.map(({ icon: Icon, label }) => (
-                <button
-                  className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-white/75 hover:bg-white/10"
-                  key={String(label)}
-                  onClick={() => onAction(`${label} opened.`)}
-                  type="button"
-                >
-                  <Icon className="h-4 w-4" aria-hidden />
-                  {label}
-                </button>
-              ))}
+              <button
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-white/75 hover:bg-white/10"
+                onClick={() =>
+                  onAction(
+                    visitorTypingPreview
+                      ? `👀 Visitor is typing: "${visitorTypingPreview}"`
+                      : "No live typing right now — a sneak-peek appears above the message box as the visitor types."
+                  )
+                }
+                type="button"
+              >
+                <MousePointer2 className="h-4 w-4" aria-hidden /> Message sneak-peek
+              </button>
+
+              <button
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-white/75 hover:bg-white/10"
+                onClick={() => {
+                  if (!cannedResponses.length) {
+                    onAction("No canned responses yet — add them in Automate → Canned responses.");
+                    return;
+                  }
+                  const list = cannedResponses.map((c, i) => `${i + 1}. ${c.shortcut} — ${c.title}`).join("\n");
+                  const pick = window.prompt("Insert which canned response? Enter the number:\n" + list);
+                  const idx = pick ? parseInt(pick, 10) - 1 : -1;
+                  const chosen = cannedResponses[idx];
+                  if (chosen) {
+                    setComposer(composer ? composer + " " + chosen.body : chosen.body);
+                  }
+                }}
+                type="button"
+              >
+                <MessageSquareText className="h-4 w-4" aria-hidden /> Canned responses
+              </button>
+
+              <button
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-white/75 hover:bg-white/10"
+                onClick={() => {
+                  if (!selectedConversation) {
+                    onAction("Open a chat first to transfer it.");
+                    return;
+                  }
+                  if (!members.length) {
+                    onAction("No other agents to transfer to.");
+                    return;
+                  }
+                  const list = members.map((m, i) => `${i + 1}. ${m.name || m.email}`).join("\n");
+                  const pick = window.prompt("Transfer this chat to which agent? Enter the number:\n" + list);
+                  const idx = pick ? parseInt(pick, 10) - 1 : -1;
+                  const agent = members[idx];
+                  if (agent) {
+                    onAssign(agent.id);
+                  }
+                }}
+                type="button"
+              >
+                <ArrowRight className="h-4 w-4" aria-hidden /> Chat transfer
+              </button>
+
+              <button
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-white/75 hover:bg-white/10"
+                onClick={() => {
+                  const meta =
+                    selectedConversation && typeof selectedConversation.metadata === "object"
+                      ? (selectedConversation.metadata as Record<string, unknown>)
+                      : {};
+                  const rating = meta.rating;
+                  onAction(
+                    rating === "good"
+                      ? "👍 This chat was rated Good."
+                      : rating === "bad"
+                        ? "👎 This chat was rated Bad."
+                        : "No rating yet — visitors are asked to rate after the chat ends."
+                  );
+                }}
+                type="button"
+              >
+                <ThumbsUp className="h-4 w-4" aria-hidden /> Chat ratings
+              </button>
             </div>
           </div>
         </div>
@@ -11221,19 +11311,6 @@ function IconButton({
     >
       <Icon className="h-4 w-4" aria-hidden />
     </button>
-  );
-}
-
-function SkeletonLines() {
-  return (
-    <div className="space-y-5">
-      {[0, 1, 2].map((row) => (
-        <div className="space-y-2" key={row}>
-          <div className="h-3 w-24 rounded bg-[#303036]" />
-          <div className="h-3 w-40 rounded bg-[#303036]" />
-        </div>
-      ))}
-    </div>
   );
 }
 
