@@ -97,7 +97,7 @@ export class AutomationService {
     // createdAt) before any other reply.
     if (options.isFirstMessage) {
       const legal = await this.ai.getLegalSettings(organizationId);
-      if (legal.enabled && legal.disclaimer.trim()) {
+      if (legal.enabled && legal.showDisclaimer && legal.disclaimer.trim()) {
         await this.postBotReplyText(organizationId, conversationId, legal.disclaimer.trim(), {
           legalDisclaimer: true
         });

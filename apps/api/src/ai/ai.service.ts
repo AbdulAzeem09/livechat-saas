@@ -57,6 +57,8 @@ export interface LegalIntakeSettings {
   conflictNames: string[];
   /** No-attorney-client-relationship disclaimer shown + timestamped to visitors. */
   disclaimer: string;
+  /** Whether to post the disclaimer as the first bot message. */
+  showDisclaimer: boolean;
   /** Respond in English and Spanish. */
   bilingual: boolean;
   /** Calendly/Cal.com URL the assistant offers qualified leads to book a consult. */
@@ -71,6 +73,7 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   conflictNames: [],
   disclaimer:
     "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
+  showDisclaimer: true,
   bilingual: true,
   bookingUrl: ""
 };
@@ -184,6 +187,7 @@ export class AiService {
       conflictNames: strList(r.conflictNames),
       disclaimer:
         typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer.trim() : DEFAULT_LEGAL_SETTINGS.disclaimer,
+      showDisclaimer: r.showDisclaimer !== false,
       bilingual: r.bilingual !== false,
       bookingUrl: typeof r.bookingUrl === "string" ? r.bookingUrl.trim() : ""
     };

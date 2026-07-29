@@ -5241,6 +5241,7 @@ export interface LegalIntakeSettings {
   practiceAreas: string[];
   conflictNames: string[];
   disclaimer: string;
+  showDisclaimer: boolean;
   bilingual: boolean;
   bookingUrl: string;
 }
@@ -5253,6 +5254,7 @@ const DEFAULT_LEGAL_SETTINGS: LegalIntakeSettings = {
   conflictNames: [],
   disclaimer:
     "I'm an automated intake assistant, not an attorney. This chat does not create an attorney-client relationship and nothing here is legal advice.",
+  showDisclaimer: true,
   bilingual: true,
   bookingUrl: ""
 };
@@ -5274,6 +5276,7 @@ function readLegalSettings(metadata: Record<string, unknown> | undefined): Legal
     conflictNames: list(r.conflictNames),
     disclaimer:
       typeof r.disclaimer === "string" && r.disclaimer.trim() ? r.disclaimer : DEFAULT_LEGAL_SETTINGS.disclaimer,
+    showDisclaimer: r.showDisclaimer !== false,
     bilingual: r.bilingual !== false,
     bookingUrl: typeof r.bookingUrl === "string" ? r.bookingUrl : ""
   };
@@ -5423,6 +5426,7 @@ function LegalIntakeCard({
   const [areas, setAreas] = useState(settings.practiceAreas.join(", "));
   const [conflicts, setConflicts] = useState(settings.conflictNames.join("\n"));
   const [disclaimer, setDisclaimer] = useState(settings.disclaimer);
+  const [showDisclaimer, setShowDisclaimer] = useState(settings.showDisclaimer);
   const [bilingual, setBilingual] = useState(settings.bilingual);
   const [bookingUrl, setBookingUrl] = useState(settings.bookingUrl);
   const [saving, setSaving] = useState(false);
@@ -5435,6 +5439,7 @@ function LegalIntakeCard({
     setAreas(settings.practiceAreas.join(", "));
     setConflicts(settings.conflictNames.join("\n"));
     setDisclaimer(settings.disclaimer);
+    setShowDisclaimer(settings.showDisclaimer);
     setBilingual(settings.bilingual);
     setBookingUrl(settings.bookingUrl);
   }, [settings]);
@@ -5448,6 +5453,7 @@ function LegalIntakeCard({
       practiceAreas: splitList(areas),
       conflictNames: splitList(conflicts),
       disclaimer: disclaimer.trim() || DEFAULT_LEGAL_SETTINGS.disclaimer,
+      showDisclaimer,
       bilingual,
       bookingUrl: bookingUrl.trim()
     });
@@ -5543,14 +5549,21 @@ function LegalIntakeCard({
             />
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block font-semibold text-slate-700">No-advice disclaimer (shown to visitors)</span>
-            <textarea
-              className="min-h-[70px] w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-400"
-              onChange={(e) => setDisclaimer(e.target.value)}
-              value={disclaimer}
-            />
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input checked={showDisclaimer} onChange={(e) => setShowDisclaimer(e.target.checked)} type="checkbox" />
+            Show the disclaimer as the first chat message
           </label>
+
+          {showDisclaimer && (
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-slate-700">No-advice disclaimer (shown to visitors)</span>
+              <textarea
+                className="min-h-[70px] w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-400"
+                onChange={(e) => setDisclaimer(e.target.value)}
+                value={disclaimer}
+              />
+            </label>
+          )}
 
           <label className="block text-sm">
             <span className="mb-1 block font-semibold text-slate-700">
