@@ -128,9 +128,11 @@ export class AutomationService {
     }
 
     // If no keyword rule answered the visitor's question, let the AI receptionist
-    // (or the legacy keyword Knowledge Base) try to answer.
+    // (or the legacy keyword Knowledge Base) try to answer. Any non-empty message
+    // counts — short intake answers like "no", "yes", "3", or "?" still need a
+    // reply (the legacy KB branch has its own word-length filter).
     const answeredByRule = matched.some((rule) => !rule.isGreeting);
-    if (!answeredByRule && body.trim().length > 4) {
+    if (!answeredByRule && body.trim().length > 0) {
       await this.maybeAiOrKbReply(organizationId, conversationId, body).catch(() => {});
     }
 
