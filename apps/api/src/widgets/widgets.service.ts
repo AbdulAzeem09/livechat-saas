@@ -1451,7 +1451,7 @@ function buildWidgetScript(): string {
     '.lcw-messages{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}' +
     '.lcw-msg{max-width:82%;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.lcw-agent{align-self:flex-start;background:#2f2f36;color:#fff;border-bottom-left-radius:5px}.lcw-visitor{align-self:flex-end;background:var(--lcw-accent,#ffd21e);color:#111;border-bottom-right-radius:5px}.lcw-system{align-self:center;background:transparent;color:#8a8a92;font-size:12px}' +
     '.lcw-greet{align-self:stretch;background:#2f2f36;border-radius:14px;padding:12px}.lcw-greet-emoji{background:#f3f4f6;border-radius:10px;text-align:center;font-size:36px;padding:16px}.lcw-greet-txt{font-size:13px;color:#e6e6ea;margin-top:10px}.lcw-quick{display:flex;gap:8px;margin-top:10px}.lcw-q{border:0;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer}.lcw-q1{background:var(--lcw-accent,#ffd21e);color:#111}.lcw-q2{background:#3a3a42;color:#dcdce2}' +
-    '.lcw-form{display:flex;gap:8px;align-items:center;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:999px;padding:11px 14px;font-size:13px;outline:none;background:#26262b;color:#fff}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#ffd21e)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#ffd21e);border-radius:50%;background:transparent;color:var(--lcw-accent,#ffd21e);cursor:pointer;font-weight:900;font-size:16px}' +
+    '.lcw-form{display:flex;gap:8px;align-items:flex-end;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:18px;padding:10px 14px;font-size:13px;outline:none;background:#26262b;color:#fff;font-family:inherit;line-height:1.4;resize:none;max-height:96px;overflow-y:auto}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#ffd21e)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#ffd21e);border-radius:50%;background:transparent;color:var(--lcw-accent,#ffd21e);cursor:pointer;font-weight:900;font-size:16px}' +
     '.lcw-launcher{height:60px;width:60px;border:0;border-radius:50%;background:var(--lcw-accent,#ff5a00);color:#fff;box-shadow:0 16px 40px rgba(0,0,0,.3);cursor:pointer;font-size:26px}.lcw-powered{font-size:10px;color:#6b6b72;text-align:center;padding:8px}' +
     '</style>' +
     '<div class="lcw-root">' +
@@ -1464,14 +1464,14 @@ function buildWidgetScript(): string {
             '<button class="lcw-letschat" type="button">Let’s chat ➤</button>' +
           '</div></div>' +
           '<div class="lcw-tabs"><button class="lcw-tab lcw-tab-home on" type="button"><b>\u{1F3E0}</b>Home</button><button class="lcw-tab lcw-tab-chat" type="button"><b>\u{1F4AC}</b>Chat</button></div>' +
-          '<div class="lcw-powered">Powered by LiveChat SaaS</div>' +
+          '<div class="lcw-powered">Powered by Today Chat</div>' +
         '</div>' +
         '<div class="lcw-chat">' +
           '<header class="lcw-chead"><button class="lcw-back lcw-icbtn" type="button" aria-label="Back">&#8592;</button><div style="flex:1"></div><button class="lcw-close lcw-icbtn" type="button" aria-label="Close">&#10005;</button></header>' +
           '<div class="lcw-abar"><div class="lcw-av"><span class="lcw-agent-ini">LC</span><span class="lcw-dot" style="border-color:#26262b"></span></div><div><div class="lcw-agent-name">Support</div><div class="lcw-agent-role">We reply in a few minutes</div></div></div>' +
           '<div class="lcw-messages"></div>' +
-          '<form class="lcw-form"><input class="lcw-input" autocomplete="off" placeholder="Write a message..." /><button class="lcw-send" type="submit">➤</button></form>' +
-          '<div class="lcw-powered">Powered by LiveChat SaaS</div>' +
+          '<form class="lcw-form"><textarea class="lcw-input" autocomplete="off" rows="1" placeholder="Write a message..."></textarea><button class="lcw-send" type="submit">➤</button></form>' +
+          '<div class="lcw-powered">Powered by Today Chat</div>' +
         '</div>' +
       '</section>' +
       '<button class="lcw-launcher" type="button" aria-label="Open chat">\u{1F4AC}</button>' +
@@ -1731,7 +1731,13 @@ function buildWidgetScript(): string {
       preview: isTyping ? String(preview || "").slice(0, 200) : ""
     });
   }
+  function autoGrowInput() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 96) + "px";
+  }
+
   input.addEventListener("input", function () {
+    autoGrowInput();
     emitTyping(input.value.length > 0, input.value);
     emitVisitorPreview(input.value.length > 0, input.value);
     if (stopTypingTimer) clearTimeout(stopTypingTimer);
@@ -1743,15 +1749,28 @@ function buildWidgetScript(): string {
     resetInactivityTimer();
   });
 
-  form.addEventListener("submit", function (event) {
-    event.preventDefault();
+  function submitComposer() {
     var body = input.value.trim();
     if (!body) return;
     input.value = "";
+    autoGrowInput();
     if (stopTypingTimer) clearTimeout(stopTypingTimer);
     emitTyping(false, "");
     emitVisitorPreview(false, "");
     sendMessage(body);
+  }
+
+  // Enter sends the message; Shift+Enter inserts a new line.
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitComposer();
+    }
+  });
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    submitComposer();
   });
 
   fetchJson("/widgets/public/" + encodeURIComponent(widgetKey) + "/config")
