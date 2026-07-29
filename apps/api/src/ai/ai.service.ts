@@ -118,8 +118,10 @@ const DEFAULT_STATUTE_YEARS: Record<string, number> = {
   employment: 3
 };
 
-/** Cheap + fast model for drafting short agent reply suggestions. */
+/** Cheap + fast model for agent-facing drafts and structured extraction. */
 const SUGGESTION_MODEL = "claude-haiku-4-5";
+/** Stronger model for the visitor-facing receptionist (better multi-turn tracking). */
+const CHAT_MODEL = "claude-sonnet-4-5";
 /** Sentinel the model returns when the knowledge base doesn't cover the question. */
 const UNKNOWN_MARKER = "[[NO_ANSWER]]";
 /** Sentinel the model appends when the visitor asks to speak with a human. */
@@ -296,10 +298,13 @@ export class AiService {
     if (legal.enabled) {
       const messages = await this.recentMessages(organizationId, conversationId);
       const transcript = this.transcript(messages);
+      const today = new Date().toISOString().slice(0, 10);
       const system = [
         this.legalPreamble(legal, settings.name),
+        `Today's date is ${today}. Use it to interpret any relative or partial dates the visitor gives (e.g. "last week", "the 10th"), and NEVER ask the visitor what the current year is — you already know it.`,
         "ALWAYS reply with a helpful message — never stay silent. If this is the start, greet the visitor warmly, briefly say you'll take down their details so an attorney can review the matter, and ask the first question.",
-        "Your job is a THOROUGH intake interview: keep asking questions, ONE or TWO at a time, until you have gathered ALL of the details below. Do not stop early. Acknowledge each answer briefly, then ask the next missing detail. Never ask for something the visitor already told you.",
+        "Your job is a THOROUGH intake interview: keep asking questions, ONE or TWO at a time, until you have gathered ALL of the details below. Do not stop early. Acknowledge each answer briefly, then ask the next missing detail.",
+        "CRITICAL — do NOT repeat questions: before writing each reply, carefully re-read the ENTIRE conversation above and note every detail the visitor has ALREADY given (name, contact, matter type, description, dates, location/county, children and their ages, opposing party, existing case number, prior attorney, etc.). Never ask again for anything already provided. If you're unsure whether something was answered, assume it was and move on to the NEXT missing item rather than re-asking. Ask only for details that are still genuinely missing.",
         [
           "Intake checklist — collect every applicable item:",
           "1. Full legal name",
@@ -331,7 +336,8 @@ export class AiService {
       const text = await this.callClaude(
         apiKey,
         system,
-        `Conversation so far:\n${transcript || `Customer: ${question}`}\n\nWrite the intake assistant's next reply.`
+        `Conversation so far:\n${transcript || `Customer: ${question}`}\n\nWrite the intake assistant's next reply.`,
+        CHAT_MODEL
       );
       if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
         return { answer: "", confident: false, usedAI: text !== null, model: null, handoff: false };
@@ -599,7 +605,12 @@ export class AiService {
   }
 
   /** POST to the Anthropic API; returns trimmed text, "" on empty, or null on failure. */
-  private async callClaude(apiKey: string, system: string, userText: string): Promise<string | null> {
+  private async callClaude(
+    apiKey: string,
+    system: string,
+    userText: string,
+    model: string = SUGGESTION_MODEL
+  ): Promise<string | null> {
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -609,7 +620,7 @@ export class AiService {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: SUGGESTION_MODEL,
+          model,
           max_tokens: 400,
           system,
           messages: [{ role: "user", content: userText }]
