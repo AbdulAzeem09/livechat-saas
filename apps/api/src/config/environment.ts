@@ -43,7 +43,10 @@ const environmentSchema = z.object({
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
   SMTP_FROM: z.string().default("LiveChat SaaS <no-reply@example.com>"),
-  FILE_STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  FILE_STORAGE_DRIVER: z.enum(["local", "supabase"]).default("local"),
+  SUPABASE_URL: z.string().optional().default(""),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(""),
+  SUPABASE_STORAGE_BUCKET: z.string().min(1).default("attachments"),
   SOCKET_IO_CORS_ORIGIN: z.string().default("*"),
   // AI (optional - leave empty to run AI suggestions in fallback mode)
   ANTHROPIC_API_KEY: z.string().optional().default(""),
@@ -54,8 +57,10 @@ const environmentSchema = z.object({
   AUTHORIZENET_SIGNATURE_KEY: z.string().optional().default(""),
   AUTHORIZENET_PUBLIC_CLIENT_KEY: z.string().optional().default(""),
   // Platform super-admins (comma-separated emails) who can see the admin panel
-  SUPER_ADMIN_EMAILS: z.string().optional().default("azeem.test@example.com")
+  SUPER_ADMIN_EMAILS: z.string().optional().default("")
 });
+
+const DEV_JWT_SECRETS = new Set(["dev-access-secret-change-me", "dev-refresh-secret-change-me"]);
 
 export type Environment = z.infer<typeof environmentSchema>;
 
@@ -68,6 +73,27 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
       .join("; ");
 
     throw new Error(`Invalid environment configuration: ${errors}`);
+  }
+
+  if (
+    parsed.data.FILE_STORAGE_DRIVER === "supabase" &&
+    (!parsed.data.SUPABASE_URL || !parsed.data.SUPABASE_SERVICE_ROLE_KEY)
+  ) {
+    throw new Error(
+      "Invalid environment configuration: FILE_STORAGE_DRIVER=supabase needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
+    );
+  }
+
+  // The dev fallbacks are public in this repo; anyone could forge tokens with them.
+  if (
+    parsed.data.NODE_ENV === "production" &&
+    (DEV_JWT_SECRETS.has(parsed.data.JWT_ACCESS_SECRET) ||
+      DEV_JWT_SECRETS.has(parsed.data.JWT_REFRESH_SECRET) ||
+      parsed.data.JWT_ACCESS_SECRET === parsed.data.JWT_REFRESH_SECRET)
+  ) {
+    throw new Error(
+      "Invalid environment configuration: set unique JWT_ACCESS_SECRET and JWT_REFRESH_SECRET in production"
+    );
   }
 
   return parsed.data;

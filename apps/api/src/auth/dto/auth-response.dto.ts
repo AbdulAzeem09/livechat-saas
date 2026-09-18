@@ -36,6 +36,9 @@ export class AuthUserDto {
   @ApiProperty({ nullable: true })
   avatarUrl!: string | null;
 
+  @ApiProperty({ description: "Whether the email address has been confirmed" })
+  emailVerified!: boolean;
+
   @ApiProperty({ type: [AuthMembershipDto] })
   memberships!: AuthMembershipDto[];
 }

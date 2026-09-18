@@ -2,6 +2,18 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import nodemailer, { type Transporter } from "nodemailer";
 
+export interface MailInput {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  /** Overrides SMTP_FROM — the email channel sends as the workspace's support address. */
+  from?: string;
+  replyTo?: string;
+  inReplyTo?: string;
+  references?: string[];
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -36,27 +48,40 @@ export class MailService {
    * Send an email. No-ops (logs) gracefully when SMTP isn't configured, so the
    * feature is fully wired and starts working the moment SMTP keys are added.
    */
-  async send(input: { to: string; subject: string; text: string; html?: string }): Promise<boolean> {
+  async send(input: MailInput): Promise<boolean> {
+    return Boolean(await this.sendAndGetMessageId(input));
+  }
+
+  /**
+   * Same as `send`, but returns the Message-ID the mail server gave the message.
+   * The email channel stores it so the customer's reply can be threaded back onto
+   * the same conversation. Returns null when nothing was sent.
+   */
+  async sendAndGetMessageId(input: MailInput): Promise<string | null> {
     const transporter = this.getTransporter();
     if (!transporter) {
       this.logger.warn(
         `Email not sent (SMTP not configured). Would send "${input.subject}" to ${input.to}`
       );
-      return false;
+      return null;
     }
 
     try {
-      await transporter.sendMail({
-        from: this.config.get<string>("SMTP_FROM") ?? "LiveChat SaaS <no-reply@example.com>",
+      const result = (await transporter.sendMail({
+        from: input.from ?? this.config.get<string>("SMTP_FROM") ?? "LiveChat SaaS <no-reply@example.com>",
         to: input.to,
         subject: input.subject,
         text: input.text,
-        ...(input.html ? { html: input.html } : {})
-      });
-      return true;
+        ...(input.html ? { html: input.html } : {}),
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+        ...(input.references?.length ? { references: input.references } : {})
+      })) as { messageId?: string };
+
+      return result.messageId ?? "";
     } catch (error) {
       this.logger.error(`Failed to send email: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
+      return null;
     }
   }
 }

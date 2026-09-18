@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import {
   Body,
   Controller,
@@ -13,13 +14,16 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiProperty,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse
 } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
+import { RATE_LIMITS } from "../common/http/client-ip-throttler.guard";
 import { AuthService } from "./auth.service";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import {
@@ -29,11 +33,19 @@ import {
   LogoutResponseDto
 } from "./dto/auth-response.dto";
 import { GoogleCallbackDto } from "./dto/google-callback.dto";
+import { ForgotPasswordDto, ResetPasswordDto, VerifyEmailDto } from "./dto/password-reset.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import type { AuthUser } from "./types/auth-user";
+
+const GOOGLE_STATE_COOKIE = "lc_google_oauth_state";
+
+class ActionResultDto {
+  @ApiProperty()
+  success!: boolean;
+}
 
 @ApiTags("Auth")
 @Controller("auth")
@@ -44,6 +56,7 @@ export class AuthController {
   ) {}
 
   @Post("register")
+  @Throttle({ default: RATE_LIMITS.register })
   @ApiOperation({ summary: "Register a user and create the first organization" })
   @ApiCreatedResponse({ type: AuthResponseDto })
   async register(
@@ -57,6 +70,7 @@ export class AuthController {
   }
 
   @Post("login")
+  @Throttle({ default: RATE_LIMITS.login })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Log in with email and password" })
   @ApiOkResponse({ type: AuthResponseDto })
@@ -72,6 +86,7 @@ export class AuthController {
   }
 
   @Post("refresh")
+  @Throttle({ default: RATE_LIMITS.refresh })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Rotate refresh token and issue a new access token" })
   @ApiOkResponse({ type: AuthResponseDto })
@@ -103,6 +118,48 @@ export class AuthController {
     return { success: true };
   }
 
+  @Post("password/forgot")
+  @Throttle({ default: RATE_LIMITS.passwordReset })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Email a password reset link (always returns success)" })
+  @ApiOkResponse({ type: ActionResultDto })
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<ActionResultDto> {
+    await this.authService.requestPasswordReset(dto.email);
+    return { success: true };
+  }
+
+  @Post("password/reset")
+  @Throttle({ default: RATE_LIMITS.passwordReset })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Set a new password using the emailed token" })
+  @ApiOkResponse({ type: ActionResultDto })
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<ActionResultDto> {
+    await this.authService.resetPassword(dto.token, dto.password);
+    return { success: true };
+  }
+
+  @Post("email/verify")
+  @Throttle({ default: RATE_LIMITS.passwordReset })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Confirm an email address using the emailed token" })
+  @ApiOkResponse({ type: ActionResultDto })
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<ActionResultDto> {
+    await this.authService.verifyEmail(dto.token);
+    return { success: true };
+  }
+
+  @Post("email/verify/resend")
+  @Throttle({ default: RATE_LIMITS.passwordReset })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Send the email confirmation link again" })
+  @ApiOkResponse({ type: ActionResultDto })
+  async resendEmailVerification(@CurrentUser() user: AuthUser): Promise<ActionResultDto> {
+    const sent = await this.authService.sendEmailVerification(user.userId);
+    return { success: sent };
+  }
+
   @Get("me")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -115,8 +172,30 @@ export class AuthController {
   @Get("google/url")
   @ApiOperation({ summary: "Create a Google OAuth authorization URL" })
   @ApiOkResponse({ type: GoogleAuthUrlResponseDto })
-  getGoogleAuthUrl(@Query("state") state?: string): GoogleAuthUrlResponseDto {
-    return this.authService.getGoogleAuthUrl(state);
+  getGoogleAuthUrl(): GoogleAuthUrlResponseDto {
+    this.authService.assertGoogleConfigured();
+    const apiUrl = this.config.getOrThrow<string>("API_URL").replace(/\/$/, "");
+
+    // The browser must start the flow on the API origin so the state cookie is first-party.
+    return {
+      authUrl: `${apiUrl}${this.getGoogleCookiePath()}/start`,
+      state: ""
+    };
+  }
+
+  @Get("google/start")
+  @ApiOperation({ summary: "Start Google OAuth: sets a state cookie and redirects to Google" })
+  startGoogleLogin(@Res() response: Response): void {
+    const { authUrl, state } = this.authService.getGoogleAuthUrl();
+
+    response.cookie(GOOGLE_STATE_COOKIE, state, {
+      httpOnly: true,
+      maxAge: 10 * 60 * 1000,
+      path: this.getGoogleCookiePath(),
+      sameSite: "lax",
+      secure: this.config.getOrThrow<boolean>("AUTH_COOKIE_SECURE")
+    });
+    response.redirect(authUrl);
   }
 
   @Get("google/callback")
@@ -127,6 +206,20 @@ export class AuthController {
     @Res() response: Response
   ): Promise<void> {
     const appUrl = this.config.getOrThrow<string>("APP_URL").replace(/\/$/, "");
+    const expectedState = this.getCookie(request, GOOGLE_STATE_COOKIE);
+
+    response.clearCookie(GOOGLE_STATE_COOKIE, {
+      path: this.getGoogleCookiePath(),
+      sameSite: "lax",
+      secure: this.config.getOrThrow<boolean>("AUTH_COOKIE_SECURE")
+    });
+
+    if (!this.statesMatch(expectedState, query.state)) {
+      response.redirect(
+        `${appUrl}/login?error=${encodeURIComponent("Google sign-in expired. Please try again.")}`
+      );
+      return;
+    }
 
     try {
       const result = await this.authService.handleGoogleCallback(
@@ -179,6 +272,23 @@ export class AuthController {
 
   private getRefreshCookiePath(): string {
     return `/${this.config.getOrThrow<string>("API_GLOBAL_PREFIX")}/auth`;
+  }
+
+  private getGoogleCookiePath(): string {
+    return `${this.getRefreshCookiePath()}/google`;
+  }
+
+  private statesMatch(expected: string | undefined, received: string | undefined): boolean {
+    if (!expected || !received) {
+      return false;
+    }
+
+    const expectedBuffer = Buffer.from(expected);
+    const receivedBuffer = Buffer.from(received);
+    return (
+      expectedBuffer.length === receivedBuffer.length &&
+      timingSafeEqual(expectedBuffer, receivedBuffer)
+    );
   }
 
   private getCookie(request: Request, name: string): string | undefined {

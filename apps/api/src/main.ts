@@ -22,7 +22,9 @@ process.on("uncaughtException", (error) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    bufferLogs: true
+    bufferLogs: true,
+    // Webhook signatures are computed over the exact request bytes.
+    rawBody: true
   });
   const config = app.get(ConfigService);
   const logger = new Logger("Bootstrap");

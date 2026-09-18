@@ -8,12 +8,14 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService, type JwtSignOptions } from "@nestjs/jwt";
-import { AuthProvider, Prisma, RoleKey, UserStatus } from "@prisma/client";
+import { AuthProvider, Prisma, RoleKey, UserStatus, UserTokenType } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { OWNER_PERMISSIONS } from "./auth.constants";
 import type { AuthResponseDto, AuthUserDto, GoogleAuthUrlResponseDto } from "./dto/auth-response.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RegisterDto } from "./dto/register.dto";
+import { AuditService } from "../common/audit/audit.service";
+import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type {
   AuthAccessTokenPayload,
@@ -21,7 +23,7 @@ import type {
   AuthUser
 } from "./types/auth-user";
 
-interface RequestMetadata {
+export interface RequestMetadata {
   ipAddress?: string | undefined;
   userAgent?: string | undefined;
 }
@@ -47,12 +49,14 @@ export class AuthService {
   constructor(
     private readonly config: ConfigService,
     private readonly jwt: JwtService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+    private readonly audit: AuditService
   ) {}
 
   async register(dto: RegisterDto, metadata: RequestMetadata): Promise<AuthResponseDto> {
     const email = this.normalizeEmail(dto.email);
-    const organizationSlug = dto.organizationSlug ?? this.slugify(dto.organizationName);
+    const requestedSlug = dto.organizationSlug ?? this.slugify(dto.organizationName);
     const passwordHash = await bcrypt.hash(dto.password, this.passwordSaltRounds);
 
     const result = await this.prisma.$transaction(async (transaction) => {
@@ -64,13 +68,13 @@ export class AuthService {
         throw new ConflictException("A user with this email already exists");
       }
 
-      const existingOrganization = await transaction.organization.findUnique({
-        where: { slug: organizationSlug }
+      // Company names repeat ("Techvance"); keep the signup working with a unique suffix.
+      const slugTaken = await transaction.organization.findUnique({
+        where: { slug: requestedSlug }
       });
-
-      if (existingOrganization) {
-        throw new ConflictException("An organization with this slug already exists");
-      }
+      const organizationSlug = slugTaken
+        ? `${requestedSlug.slice(0, 112)}-${randomBytes(3).toString("hex")}`
+        : requestedSlug;
 
       const user = await transaction.user.create({
         data: {
@@ -149,6 +153,9 @@ export class AuthService {
       };
     });
 
+    // Fire-and-forget: a mail hiccup must not fail the signup itself.
+    void this.sendEmailVerification(result.user.id).catch(() => {});
+
     return this.createSession(result.user.id, metadata, result.organizationId);
   }
 
@@ -172,6 +179,7 @@ export class AuthService {
       where: { id: user.id },
       data: { lastLoginAt: new Date() }
     });
+    void this.recordAccountEvent(user.id, "auth.login", metadata, { method: "password" });
 
     return this.createSession(user.id, metadata);
   }
@@ -228,11 +236,232 @@ export class AuthService {
     });
   }
 
+  /**
+   * Create a password account with no organization of its own. Used when someone joins a
+   * workspace from an invite link, so signing up doesn't also create a new company.
+   */
+  async createPasswordUser(input: {
+    email: string;
+    name: string;
+    password: string;
+  }): Promise<{ id: string; email: string }> {
+    const email = this.normalizeEmail(input.email);
+    const passwordHash = await bcrypt.hash(input.password, this.passwordSaltRounds);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const existingUser = await transaction.user.findUnique({ where: { email } });
+      if (existingUser) {
+        throw new ConflictException(
+          "An account with this email already exists. Log in to accept the invitation."
+        );
+      }
+
+      const user = await transaction.user.create({
+        data: { email, name: input.name, passwordHash, status: UserStatus.ACTIVE }
+      });
+      await transaction.authProviderIdentity.create({
+        data: {
+          userId: user.id,
+          provider: AuthProvider.PASSWORD,
+          providerUserId: email,
+          providerEmail: email
+        }
+      });
+
+      return { id: user.id, email };
+    });
+  }
+
+  /** Issue access + refresh tokens, opening the given organization first. */
+  issueSession(
+    userId: string,
+    metadata: RequestMetadata,
+    preferredOrganizationId?: string
+  ): Promise<AuthResponseDto> {
+    return this.createSession(userId, metadata, preferredOrganizationId);
+  }
+
+  /**
+   * Start a password reset. Always resolves the same way so the endpoint can't be used to
+   * discover which email addresses have accounts.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: this.normalizeEmail(email) }
+    });
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      return;
+    }
+
+    const token = await this.issueUserToken(user.id, UserTokenType.PASSWORD_RESET, 60);
+    const link = `${this.appUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+
+    await this.mail.send({
+      to: user.email,
+      subject: "Reset your LiveChat password",
+      text:
+        `We received a request to reset your LiveChat password.\n\nSet a new password:\n${link}\n\n` +
+        "This link expires in 1 hour. If you didn't ask for it, you can ignore this email.",
+      html:
+        `<p>We received a request to reset your LiveChat password.</p>` +
+        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Set a new password</a></p>` +
+        `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 1 hour. If you didn't ask for it, you can ignore this email.</p>`
+    });
+  }
+
+  /** Finish a password reset: set the new password and sign every other session out. */
+  async resetPassword(token: string, password: string): Promise<void> {
+    const record = await this.consumeUserToken(token, UserTokenType.PASSWORD_RESET);
+    const passwordHash = await bcrypt.hash(password, this.passwordSaltRounds);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: record.userId },
+        // Clicking the emailed link also proves the address belongs to them.
+        data: { passwordHash, emailVerifiedAt: new Date() }
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() }
+      })
+    ]);
+    void this.recordAccountEvent(record.userId, "auth.password_reset", {});
+  }
+
+  /** Email the "confirm your address" link. Safe to call repeatedly. */
+  async sendEmailVerification(userId: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || user.emailVerifiedAt) {
+      return false;
+    }
+
+    const token = await this.issueUserToken(user.id, UserTokenType.EMAIL_VERIFICATION, 60 * 24);
+    const link = `${this.appUrl()}/verify-email?token=${encodeURIComponent(token)}`;
+
+    return this.mail.send({
+      to: user.email,
+      subject: "Confirm your email address",
+      text: `Confirm your email address to finish setting up LiveChat:\n${link}\n\nThis link expires in 24 hours.`,
+      html:
+        `<p>Confirm your email address to finish setting up LiveChat.</p>` +
+        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Confirm email</a></p>` +
+        `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 24 hours.</p>`
+    });
+  }
+
+  async verifyEmail(token: string): Promise<{ email: string }> {
+    const record = await this.consumeUserToken(token, UserTokenType.EMAIL_VERIFICATION);
+    const user = await this.prisma.user.update({
+      where: { id: record.userId },
+      data: { emailVerifiedAt: new Date() }
+    });
+
+    return { email: user.email };
+  }
+
+  /**
+   * Account-level events (login, password reset) are logged once per workspace the user
+   * belongs to, so each workspace's audit log shows who signed in.
+   */
+  private async recordAccountEvent(
+    userId: string,
+    action: string,
+    metadata: RequestMetadata,
+    payload: Record<string, unknown> = {}
+  ): Promise<void> {
+    const memberships = await this.prisma.userOrganization
+      .findMany({
+        where: { userId, status: UserStatus.ACTIVE },
+        select: { id: true, organizationId: true },
+        take: 10
+      })
+      .catch(() => []);
+    const entry = {
+      actorUserId: userId,
+      action,
+      entityType: "user",
+      entityId: userId,
+      ipAddress: metadata.ipAddress,
+      userAgent: metadata.userAgent,
+      payload
+    };
+
+    if (!memberships.length) {
+      this.audit.record(entry);
+      return;
+    }
+
+    for (const membership of memberships) {
+      this.audit.record({
+        ...entry,
+        organizationId: membership.organizationId,
+        actorMemberId: membership.id
+      });
+    }
+  }
+
+  private appUrl(): string {
+    return (this.config.get<string>("APP_URL") ?? "http://localhost:3000").replace(/\/$/, "");
+  }
+
+  /** Create a single-use token, replacing any earlier unused token of the same type. */
+  private async issueUserToken(
+    userId: string,
+    type: UserTokenType,
+    expiresInMinutes: number
+  ): Promise<string> {
+    const token = randomBytes(48).toString("base64url");
+
+    await this.prisma.$transaction([
+      this.prisma.userToken.updateMany({
+        where: { userId, type, usedAt: null },
+        data: { usedAt: new Date() }
+      }),
+      this.prisma.userToken.create({
+        data: {
+          userId,
+          type,
+          tokenHash: this.hashToken(token),
+          expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000)
+        }
+      })
+    ]);
+
+    return token;
+  }
+
+  private async consumeUserToken(
+    token: string,
+    type: UserTokenType
+  ): Promise<{ userId: string }> {
+    const record = await this.prisma.userToken.findUnique({
+      where: { tokenHash: this.hashToken(token) }
+    });
+
+    if (!record || record.type !== type || record.usedAt || record.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException("This link is invalid or has expired. Please request a new one.");
+    }
+
+    await this.prisma.userToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() }
+    });
+
+    return { userId: record.userId };
+  }
+
   async getMe(userId: string): Promise<AuthUserDto> {
     return this.buildUserDto(userId);
   }
 
-  getGoogleAuthUrl(state = randomBytes(16).toString("hex")): GoogleAuthUrlResponseDto {
+  assertGoogleConfigured(): void {
+    this.getGoogleConfig();
+  }
+
+  getGoogleAuthUrl(): GoogleAuthUrlResponseDto {
+    const state = randomBytes(32).toString("base64url");
     const { clientId, callbackUrl } = this.getGoogleConfig();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
 
@@ -260,6 +489,11 @@ export class AuthService {
 
     const tokens = await this.exchangeGoogleCode(code);
     const profile = await this.fetchGoogleProfile(tokens.access_token);
+
+    if (!profile.email_verified) {
+      throw new UnauthorizedException("Your Google email address is not verified");
+    }
+
     const email = this.normalizeEmail(profile.email);
     const tokenExpiresAt =
       typeof tokens.expires_in === "number"
@@ -303,6 +537,14 @@ export class AuthService {
       const existingUser = await transaction.user.findUnique({
         where: { email }
       });
+
+      // Signup never verifies email, so anyone could have pre-registered this address with a
+      // password. Don't silently attach Google to such an account (account pre-hijacking).
+      if (existingUser?.passwordHash && !existingUser.emailVerifiedAt) {
+        throw new ConflictException(
+          "An account with this email already exists. Sign in with your email and password."
+        );
+      }
 
       const userRecord =
         existingUser ??
@@ -482,6 +724,7 @@ export class AuthService {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      emailVerified: user.emailVerifiedAt !== null,
       memberships: memberships
         .map<AuthMembershipSummary | null>((membership) => {
           const organization = organizationById.get(membership.organizationId);
