@@ -123,6 +123,7 @@ const DEFAULT_STATUTE_YEARS: Record<string, number> = {
 
 /** Cheap + fast model for agent-facing drafts and structured extraction. */
 const SUGGESTION_MODEL = "claude-haiku-4-5";
+const CLAUDE_TIMEOUT_MS = 25_000;
 /** Stronger model for the visitor-facing receptionist (better multi-turn tracking). */
 const CHAT_MODEL = "claude-sonnet-4-5";
 /** Sentinel the model returns when the knowledge base doesn't cover the question. */
@@ -601,6 +602,16 @@ export class AiService {
   }
 
   /** POST to the Anthropic API; returns trimmed text, "" on empty, or null on failure. */
+  /** Ask the model a one-off question. Used by the summary and tagging features. */
+  async complete(
+    apiKey: string,
+    system: string,
+    userText: string,
+    model?: string
+  ): Promise<string | null> {
+    return this.callClaude(apiKey, system, userText, model);
+  }
+
   private async callClaude(
     apiKey: string,
     system: string,
@@ -620,7 +631,9 @@ export class AiService {
           max_tokens: 400,
           system,
           messages: [{ role: "user", content: userText }]
-        })
+        }),
+        // A hung upstream call would otherwise hold the visitor's HTTP request open.
+        signal: AbortSignal.timeout(CLAUDE_TIMEOUT_MS)
       });
       if (!response.ok) {
         return null;

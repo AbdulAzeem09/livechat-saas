@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import {
   AutomationRule,
   Message,
@@ -12,19 +12,23 @@ import { AiService } from "../ai/ai.service";
 import { ConversationsGateway } from "../conversations/conversations.gateway";
 import type { MessageDto } from "../conversations/dto/conversation-response.dto";
 import { PrismaService } from "../prisma/prisma.service";
+import { BotFlowService } from "./bot-flow.service";
 import { AutomationRuleDto } from "./dto/automation-response.dto";
 import { CreateAutomationRuleDto } from "./dto/create-automation-rule.dto";
 import { UpdateAutomationRuleDto } from "./dto/update-automation-rule.dto";
 
 /** Cap auto-replies per visitor message so misconfigured rules can't spam. */
 const MAX_REPLIES_PER_MESSAGE = 3;
+/** After this many visitor messages in one chat, stop calling the paid AI (reply + intake analysis). */
+const MAX_AI_VISITOR_MESSAGES = 60;
 
 @Injectable()
 export class AutomationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: ConversationsGateway,
-    private readonly ai: AiService
+    private readonly ai: AiService,
+    private readonly botFlows: BotFlowService
   ) {}
 
   async list(organizationId: string): Promise<AutomationRuleDto[]> {
@@ -104,6 +108,25 @@ export class AutomationService {
       }
     }
 
+    // A drawn chatbot flow, when one is switched on, answers instead of the keyword rules.
+    const handledByFlow = await this.botFlows
+      .handleVisitorMessage(organizationId, conversationId, body, {
+        isFirstMessage: options.isFirstMessage,
+        say: (text, metadata) =>
+          this.postBotReplyText(organizationId, conversationId, text, metadata ?? {}),
+        handOver: () => this.pauseAiForHuman(organizationId, conversationId)
+      })
+      .catch((error: unknown) => {
+        new Logger(AutomationService.name).warn(
+          `Chatbot flow failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return false;
+      });
+
+    if (handledByFlow) {
+      return;
+    }
+
     const rules = await this.prisma.automationRule.findMany({
       where: { organizationId, enabled: true },
       orderBy: [{ isGreeting: "desc" }, { createdAt: "asc" }]
@@ -132,14 +155,19 @@ export class AutomationService {
     // counts — short intake answers like "no", "yes", "3", or "?" still need a
     // reply (the legacy KB branch has its own word-length filter).
     const answeredByRule = matched.some((rule) => !rule.isGreeting);
+    const withinAiBudget = await this.isWithinAiBudget(organizationId, conversationId);
     if (!answeredByRule && body.trim().length > 0) {
-      await this.maybeAiOrKbReply(organizationId, conversationId, body).catch(() => {});
+      await this.maybeAiOrKbReply(organizationId, conversationId, body, withinAiBudget).catch(
+        () => {}
+      );
     }
 
     // In legal firm mode, re-run intake analysis (conflict / jurisdiction / SOL)
     // in the background so agents always see fresh flags. No-ops when legal mode
     // is off or no AI key is configured.
-    void this.ai.analyzeIntake(organizationId, conversationId).catch(() => {});
+    if (withinAiBudget) {
+      void this.ai.analyzeIntake(organizationId, conversationId).catch(() => {});
+    }
   }
 
   /**
@@ -152,11 +180,16 @@ export class AutomationService {
   private async maybeAiOrKbReply(
     organizationId: string,
     conversationId: string,
-    body: string
+    body: string,
+    withinAiBudget: boolean
   ): Promise<void> {
     const settings = await this.ai.getSettings(organizationId);
 
     if (settings.mode === "auto") {
+      if (!withinAiBudget) {
+        await this.pauseAiForHuman(organizationId, conversationId);
+        return;
+      }
       // Once a human has been requested, the AI steps back and lets an agent take over.
       if (await this.isAiPaused(organizationId, conversationId)) {
         return;
@@ -178,6 +211,13 @@ export class AutomationService {
       await this.answerFromKnowledgeBase(organizationId, conversationId, body);
     }
     // "suggest": do nothing here — the agent triggers a suggestion from Copilot.
+  }
+
+  private async isWithinAiBudget(organizationId: string, conversationId: string): Promise<boolean> {
+    const visitorMessages = await this.prisma.message.count({
+      where: { organizationId, conversationId, senderType: ParticipantType.VISITOR }
+    });
+    return visitorMessages <= MAX_AI_VISITOR_MESSAGES;
   }
 
   /** Chatbot fallback: find a published KB article matching the message and reply with it. */
