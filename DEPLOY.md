@@ -47,8 +47,19 @@ Save → Render redeploys. Done — open your Vercel URL and log in.
 ## Notes
 - **HTTPS** is automatic on both → billing card entry (Accept.js) and the widget on
   real sites will work.
-- **File uploads** on Render free are ephemeral (lost on restart). Fine for testing;
-  move to Supabase Storage / S3 for production.
+- **File uploads**: Render's disk is wiped on every restart/deploy, so the blueprint sets
+  `FILE_STORAGE_DRIVER=supabase`. In Supabase → Storage create a **private** bucket named
+  `attachments`, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings →
+  API) on Render. The API refuses to start if the driver is `supabase` without them.
+- **Database URL**: if `DATABASE_URL` uses Supabase's transaction pooler (port 6543) the API adds
+  `pgbouncer=true&connection_limit=5` automatically. Run migrations against the **direct**
+  connection (port 5432): `DATABASE_URL=<direct url> pnpm db:deploy`.
+- **Secrets**: in production the API refuses to start with the dev JWT secrets or with the same
+  value for `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`. `SUPER_ADMIN_EMAILS` has no default.
+- **Billing webhook**: in Authorize.net → Account → Webhooks add
+  `https://livechat-api.onrender.com/api/v1/billing/webhooks/authorizenet` (subscription events) and
+  set `AUTHORIZENET_SIGNATURE_KEY` on Render. Without a gateway configured, production refuses
+  to activate plans or add-ons (mock billing is development-only).
 - **Supabase free** pauses after ~1 week idle — upgrade to Pro when going live for real.
 - Update the widget install snippet's `src` to your Render API URL when embedding on a
   real website.

@@ -56,5 +56,14 @@ services:
         sync: false
       - key: GOOGLE_CALLBACK_URL # https://livechat-api.onrender.com/api/v1/auth/google/callback
         sync: false
-      - key: SUPER_ADMIN_EMAILS
+      - key: SUPER_ADMIN_EMAILS # comma-separated; empty disables the admin panel
         sync: false
+      # ---- Attachments: Render's disk is wiped on restart, keep files in Supabase Storage ----
+      - key: FILE_STORAGE_DRIVER
+        value: supabase
+      - key: SUPABASE_URL # https://<project-ref>.supabase.co
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: attachments
