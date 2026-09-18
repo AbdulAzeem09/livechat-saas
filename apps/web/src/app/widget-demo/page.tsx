@@ -9,8 +9,6 @@ interface WidgetDemoPageProps {
 export default async function WidgetDemoPage({ searchParams }: WidgetDemoPageProps) {
   const params = await searchParams;
   const key = Array.isArray(params.key) ? params.key[0] : params.key;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
-  const scriptUrl = `${apiUrl.replace(/\/$/, "")}/widget.js`;
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
@@ -51,7 +49,7 @@ export default async function WidgetDemoPage({ searchParams }: WidgetDemoPagePro
         )}
       </section>
 
-      {key && <WidgetDemoLoader scriptUrl={scriptUrl} widgetKey={key} />}
+      {key && <WidgetDemoLoader widgetKey={key} />}
     </main>
   );
 }

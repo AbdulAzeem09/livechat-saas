@@ -44,7 +44,9 @@ export function LoginForm() {
     try {
       const auth = await login(email, password);
       saveSession(auth);
-      router.push("/dashboard");
+      // Return to where the user came from (e.g. an invite link); only same-site paths.
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Login failed");
     } finally {
@@ -88,6 +90,9 @@ export function LoginForm() {
       >
         Continue
       </Button>
+      <a className="justify-self-end text-xs font-semibold text-white/60 hover:text-white" href="/forgot-password">
+        Forgot your password?
+      </a>
       <div className="relative my-1 flex items-center gap-3">
         <span className="h-px flex-1 bg-white/10" />
         <span className="text-xs font-medium text-white/40">or</span>

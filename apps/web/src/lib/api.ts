@@ -30,10 +30,26 @@ import type {
   Organization,
   OrganizationMember,
   ReportSummary,
+  ReportSchedule,
+  ConversationSummary,
+  TagSuggestion,
+  BotFlow,
+  FlowNode,
+  AgentShift,
+  AppNotification,
+  AuditLogEntry,
+  ChannelConnection,
+  ConnectChannelInput,
+  Contact,
+  MarketplaceApp,
+  MemberSchedule,
+  SaveSsoInput,
+  SsoConnection,
   WidgetInstall
 } from "./types";
+import { apiBaseUrl } from "./api-url";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+
 const SESSION_KEY = "livechat.session";
 
 export class ApiClientError extends Error {
@@ -118,7 +134,7 @@ export function refreshAccessToken(): Promise<string | null> {
       // one-off hiccup doesn't surface a "session expired" error or a redirect.
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const response = await fetch(`${API_URL}/auth/refresh`, {
+          const response = await fetch(`${apiBaseUrl()}/auth/refresh`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             credentials: "include",
@@ -170,7 +186,7 @@ async function fetchWithToken(
     headers.set("authorization", `Bearer ${token}`);
   }
 
-  return fetch(`${API_URL}${path}`, {
+  return fetch(`${apiBaseUrl()}${path}`, {
     ...options,
     headers,
     credentials: "include"
@@ -566,7 +582,7 @@ export async function downloadInvoicePdf(
   filename: string
 ): Promise<void> {
   const response = await fetch(
-    `${API_URL}/organizations/${organizationId}/billing/invoices/${invoiceId}/pdf`,
+    `${apiBaseUrl()}/organizations/${organizationId}/billing/invoices/${invoiceId}/pdf`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!response.ok) {
@@ -831,7 +847,7 @@ export async function importKnowledgePdf(
   const form = new FormData();
   form.append("file", file);
 
-  const response = await fetch(`${API_URL}/organizations/${organizationId}/knowledge/import/pdf`, {
+  const response = await fetch(`${apiBaseUrl()}/organizations/${organizationId}/knowledge/import/pdf`, {
     method: "POST",
     credentials: "include",
     headers: { authorization: `Bearer ${accessToken}` },
@@ -1003,7 +1019,7 @@ export async function uploadAttachment(
   form.append("file", file);
 
   const response = await fetch(
-    `${API_URL}/organizations/${organizationId}/conversations/${conversationId}/attachments`,
+    `${apiBaseUrl()}/organizations/${organizationId}/conversations/${conversationId}/attachments`,
     {
       method: "POST",
       credentials: "include",
@@ -1018,6 +1034,34 @@ export async function uploadAttachment(
   }
 
   return (await response.json()) as Message;
+}
+
+/** Every widget in the workspace — one per website or brand. */
+export function listWidgets(organizationId: string, accessToken: string): Promise<WidgetInstall[]> {
+  return apiRequest<WidgetInstall[]>(`/organizations/${organizationId}/widgets`, { accessToken });
+}
+
+export function createWidget(
+  organizationId: string,
+  accessToken: string,
+  name: string
+): Promise<WidgetInstall> {
+  return apiRequest<WidgetInstall>(`/organizations/${organizationId}/widgets`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ name })
+  });
+}
+
+export function deleteWidget(
+  organizationId: string,
+  widgetId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(`/organizations/${organizationId}/widgets/${widgetId}`, {
+    accessToken,
+    method: "DELETE"
+  });
 }
 
 export function getDefaultWidgetInstall(
@@ -1054,6 +1098,7 @@ export function updateWidgetInstall(
     workingHours?: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> };
     eyeCatcher?: string;
     eyeCatcherEnabled?: boolean;
+    eyeCatcherTheme?: string;
     slackWebhookUrl?: string;
     preChatFields?: Array<{ id: string; label: string; type: string; required: boolean }>;
     postChatEnabled?: boolean;
@@ -1063,13 +1108,14 @@ export function updateWidgetInstall(
     inactivityMessage?: string;
     inactivitySeconds?: number;
     menuOptions?: Array<{ id: string; label: string; reply: string }>;
-  }
+  },
+  widgetId?: string
 ): Promise<WidgetInstall> {
-  return apiRequest<WidgetInstall>(`/organizations/${organizationId}/widgets/default`, {
-    accessToken,
-    method: "PATCH",
-    body: JSON.stringify(input)
-  });
+  // Without a widget id this edits the workspace's first widget, as it always has.
+  return apiRequest<WidgetInstall>(
+    `/organizations/${organizationId}/widgets/${widgetId ?? "default"}`,
+    { accessToken, method: "PATCH", body: JSON.stringify(input) }
+  );
 }
 
 export interface AdminOverviewData {
@@ -1115,6 +1161,461 @@ export function clearVisitorData(
 
 export function getGoogleAuthUrl(): Promise<{ authUrl: string; state: string }> {
   return apiRequest<{ authUrl: string; state: string }>("/auth/google/url");
+}
+
+// ---- work scheduler ----
+
+export function listSchedules(organizationId: string, accessToken: string): Promise<MemberSchedule[]> {
+  return apiRequest<MemberSchedule[]>(`/organizations/${organizationId}/schedules`, { accessToken });
+}
+
+export function saveSchedule(
+  organizationId: string,
+  membershipId: string,
+  accessToken: string,
+  shifts: AgentShift[]
+): Promise<MemberSchedule> {
+  return apiRequest<MemberSchedule>(`/organizations/${organizationId}/schedules/${membershipId}`, {
+    accessToken,
+    method: "PUT",
+    body: JSON.stringify({ shifts })
+  });
+}
+
+// ---- in-app notifications (bell) ----
+
+export function listNotifications(
+  organizationId: string,
+  accessToken: string
+): Promise<{ items: AppNotification[]; unread: number }> {
+  return apiRequest<{ items: AppNotification[]; unread: number }>(
+    `/organizations/${organizationId}/notifications`,
+    { accessToken }
+  );
+}
+
+export function markNotificationsRead(
+  organizationId: string,
+  accessToken: string,
+  notificationId?: string
+): Promise<{ success: true }> {
+  const path = notificationId
+    ? `/organizations/${organizationId}/notifications/${notificationId}/read`
+    : `/organizations/${organizationId}/notifications/read`;
+
+  return apiRequest<{ success: true }>(path, { accessToken, method: "POST" });
+}
+
+// ---- CRM (customers) ----
+
+export function listContacts(
+  organizationId: string,
+  accessToken: string,
+  params: { search?: string } = {}
+): Promise<Contact[]> {
+  const search = new URLSearchParams();
+  if (params.search) search.set("search", params.search);
+
+  return apiRequest<Contact[]>(
+    `/organizations/${organizationId}/contacts?${search.toString()}`,
+    { accessToken }
+  );
+}
+
+export function getContact(
+  organizationId: string,
+  contactId: string,
+  accessToken: string
+): Promise<Contact> {
+  return apiRequest<Contact>(`/organizations/${organizationId}/contacts/${contactId}`, {
+    accessToken
+  });
+}
+
+export function createContact(
+  organizationId: string,
+  accessToken: string,
+  input: { name?: string; email?: string; phone?: string; company?: string }
+): Promise<Contact> {
+  return apiRequest<Contact>(`/organizations/${organizationId}/contacts`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateContact(
+  organizationId: string,
+  contactId: string,
+  accessToken: string,
+  input: { name?: string; email?: string; phone?: string; company?: string }
+): Promise<Contact> {
+  return apiRequest<Contact>(`/organizations/${organizationId}/contacts/${contactId}`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function addContactNote(
+  organizationId: string,
+  contactId: string,
+  accessToken: string,
+  body: string
+): Promise<Contact> {
+  return apiRequest<Contact>(`/organizations/${organizationId}/contacts/${contactId}/notes`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function deleteContactNote(
+  organizationId: string,
+  contactId: string,
+  noteId: string,
+  accessToken: string
+): Promise<Contact> {
+  return apiRequest<Contact>(
+    `/organizations/${organizationId}/contacts/${contactId}/notes/${noteId}`,
+    { accessToken, method: "DELETE" }
+  );
+}
+
+export function addContactTag(
+  organizationId: string,
+  contactId: string,
+  accessToken: string,
+  name: string
+): Promise<Contact> {
+  return apiRequest<Contact>(`/organizations/${organizationId}/contacts/${contactId}/tags`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ name })
+  });
+}
+
+export function removeContactTag(
+  organizationId: string,
+  contactId: string,
+  accessToken: string,
+  name: string
+): Promise<Contact> {
+  return apiRequest<Contact>(
+    `/organizations/${organizationId}/contacts/${contactId}/tags/${encodeURIComponent(name)}`,
+    { accessToken, method: "DELETE" }
+  );
+}
+
+// ---- password reset and email verification ----
+
+export function requestPasswordReset(email: string): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>("/auth/password/forgot", {
+    method: "POST",
+    body: JSON.stringify({ email })
+  });
+}
+
+export function resetPassword(token: string, password: string): Promise<AuthResponse> {
+  return apiRequest<AuthResponse>("/auth/password/reset", {
+    method: "POST",
+    body: JSON.stringify({ token, password })
+  });
+}
+
+export function verifyEmail(token: string): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>("/auth/email/verify", {
+    method: "POST",
+    body: JSON.stringify({ token })
+  });
+}
+
+export function resendEmailVerification(accessToken: string): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>("/auth/email/verify/resend", {
+    accessToken,
+    method: "POST"
+  });
+}
+
+// ---- audit log ----
+
+export function listAuditLogs(
+  organizationId: string,
+  accessToken: string,
+  params: { action?: string; limit?: number } = {}
+): Promise<{ items: AuditLogEntry[]; total: number }> {
+  const search = new URLSearchParams();
+  if (params.action) search.set("action", params.action);
+  search.set("limit", String(params.limit ?? 50));
+
+  return apiRequest<{ items: AuditLogEntry[]; total: number }>(
+    `/organizations/${organizationId}/audit-logs?${search.toString()}`,
+    { accessToken }
+  );
+}
+
+/** Sign up straight from an invitation link, without a separate account first. */
+export function signUpWithInvitation(
+  token: string,
+  input: { name: string; password: string }
+): Promise<AuthResponse> {
+  return apiRequest<AuthResponse>(`/invitations/${encodeURIComponent(token)}/signup`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+/** Tell the server the agent has seen the visitor's messages (read receipts). */
+export function markConversationRead(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(
+    `/organizations/${organizationId}/conversations/${conversationId}/read`,
+    { accessToken, method: "POST" }
+  );
+}
+
+// ---- messaging channels (WhatsApp / Messenger / Instagram / Apple) ----
+
+/** Slug used in the channel URLs; the API returns the enum value. */
+export function channelSlug(channel: ChannelConnection["channel"]): string {
+  return channel.toLowerCase();
+}
+
+export function listChannels(
+  organizationId: string,
+  accessToken: string
+): Promise<ChannelConnection[]> {
+  return apiRequest<ChannelConnection[]>(`/organizations/${organizationId}/channels`, {
+    accessToken
+  });
+}
+
+export function connectChannel(
+  organizationId: string,
+  channel: ChannelConnection["channel"],
+  accessToken: string,
+  input: ConnectChannelInput
+): Promise<ChannelConnection> {
+  return apiRequest<ChannelConnection>(
+    `/organizations/${organizationId}/channels/${channelSlug(channel)}`,
+    { accessToken, method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export function disconnectChannel(
+  organizationId: string,
+  channel: ChannelConnection["channel"],
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(
+    `/organizations/${organizationId}/channels/${channelSlug(channel)}`,
+    { accessToken, method: "DELETE" }
+  );
+}
+
+// ---- apps marketplace ----
+
+export function listApps(organizationId: string, accessToken: string): Promise<MarketplaceApp[]> {
+  return apiRequest<MarketplaceApp[]>(`/organizations/${organizationId}/apps`, { accessToken });
+}
+
+export function installApp(
+  organizationId: string,
+  appKey: string,
+  accessToken: string,
+  settings: Record<string, unknown> = {}
+): Promise<MarketplaceApp[]> {
+  return apiRequest<MarketplaceApp[]>(`/organizations/${organizationId}/apps/${appKey}`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ settings })
+  });
+}
+
+/** Really call the provider with the saved keys, so setup mistakes surface immediately. */
+export function testApp(
+  organizationId: string,
+  appKey: string,
+  accessToken: string
+): Promise<{ ok: boolean; message: string }> {
+  return apiRequest<{ ok: boolean; message: string }>(
+    `/organizations/${organizationId}/apps/${appKey}/test`,
+    { accessToken, method: "POST" }
+  );
+}
+
+export function uninstallApp(
+  organizationId: string,
+  appKey: string,
+  accessToken: string
+): Promise<MarketplaceApp[]> {
+  return apiRequest<MarketplaceApp[]>(`/organizations/${organizationId}/apps/${appKey}`, {
+    accessToken,
+    method: "DELETE"
+  });
+}
+
+// ---- single sign-on ----
+
+export function getSsoConnection(
+  organizationId: string,
+  accessToken: string
+): Promise<SsoConnection | null> {
+  return apiRequest<SsoConnection | null>(`/organizations/${organizationId}/sso`, { accessToken });
+}
+
+export function saveSsoConnection(
+  organizationId: string,
+  accessToken: string,
+  input: SaveSsoInput
+): Promise<SsoConnection> {
+  return apiRequest<SsoConnection>(`/organizations/${organizationId}/sso`, {
+    accessToken,
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
+export function removeSsoConnection(
+  organizationId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(`/organizations/${organizationId}/sso`, {
+    accessToken,
+    method: "DELETE"
+  });
+}
+
+// ---- visual chatbot (flow builder) ----
+
+export function listBotFlows(organizationId: string, accessToken: string): Promise<BotFlow[]> {
+  return apiRequest<BotFlow[]>(`/organizations/${organizationId}/bot-flows`, { accessToken });
+}
+
+export function createBotFlow(
+  organizationId: string,
+  accessToken: string,
+  name: string
+): Promise<BotFlow> {
+  return apiRequest<BotFlow>(`/organizations/${organizationId}/bot-flows`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ name })
+  });
+}
+
+export function updateBotFlow(
+  organizationId: string,
+  flowId: string,
+  accessToken: string,
+  input: { name?: string; isActive?: boolean; startNodeId?: string | null; nodes?: FlowNode[] }
+): Promise<BotFlow> {
+  return apiRequest<BotFlow>(`/organizations/${organizationId}/bot-flows/${flowId}`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteBotFlow(
+  organizationId: string,
+  flowId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(`/organizations/${organizationId}/bot-flows/${flowId}`, {
+    accessToken,
+    method: "DELETE"
+  });
+}
+
+// ---- AI: summary and topic tags ----
+
+export function summariseConversation(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string
+): Promise<ConversationSummary> {
+  return apiRequest<ConversationSummary>(
+    `/organizations/${organizationId}/conversations/${conversationId}/ai/summary`,
+    { accessToken, method: "POST" }
+  );
+}
+
+export function autoTagConversation(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string
+): Promise<TagSuggestion> {
+  return apiRequest<TagSuggestion>(
+    `/organizations/${organizationId}/conversations/${conversationId}/ai/tags`,
+    { accessToken, method: "POST" }
+  );
+}
+
+// ---- report exports and scheduled emails ----
+
+/** The CSV comes back as text, not JSON, so it is fetched directly. */
+export async function downloadReportCsv(
+  organizationId: string,
+  type: "chats" | "agents" | "tags",
+  accessToken: string
+): Promise<string> {
+  const response = await fetch(
+    `${apiBaseUrl()}/organizations/${organizationId}/reports/export?type=${type}`,
+    { headers: { authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (!response.ok) {
+    throw new ApiClientError("Could not build that export", response.status);
+  }
+
+  return response.text();
+}
+
+export function listReportSchedules(
+  organizationId: string,
+  accessToken: string
+): Promise<ReportSchedule[]> {
+  return apiRequest<ReportSchedule[]>(`/organizations/${organizationId}/reports/schedules`, {
+    accessToken
+  });
+}
+
+export function createReportSchedule(
+  organizationId: string,
+  accessToken: string,
+  input: { reportType: string; frequency: string; recipients: string[]; hourUtc?: number }
+): Promise<ReportSchedule> {
+  return apiRequest<ReportSchedule>(`/organizations/${organizationId}/reports/schedules`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function runReportSchedule(
+  organizationId: string,
+  scheduleId: string,
+  accessToken: string
+): Promise<{ sent: boolean; recipients: string[] }> {
+  return apiRequest<{ sent: boolean; recipients: string[] }>(
+    `/organizations/${organizationId}/reports/schedules/${scheduleId}/run`,
+    { accessToken, method: "POST" }
+  );
+}
+
+export function deleteReportSchedule(
+  organizationId: string,
+  scheduleId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(
+    `/organizations/${organizationId}/reports/schedules/${scheduleId}`,
+    { accessToken, method: "DELETE" }
+  );
 }
 
 async function readErrorBody(response: Response): Promise<ApiErrorBody | undefined> {

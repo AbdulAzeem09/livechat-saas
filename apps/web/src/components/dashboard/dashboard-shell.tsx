@@ -107,6 +107,9 @@ import {
   listAutomationRules,
   updateAutomationRule as updateAutomationRuleRequest,
   getDefaultWidgetInstall,
+  listWidgets,
+  createWidget,
+  deleteWidget,
   getCurrentUser,
   getReportSummary,
   subscribePlan as subscribePlanRequest,
@@ -124,7 +127,43 @@ import {
   listMessages,
   listOrganizations,
   provisionClientOrg as provisionClientOrgRequest,
+  addContactNote,
+  addContactTag,
+  createContact,
+  deleteContactNote,
+  getContact,
+  listAuditLogs,
+  downloadReportCsv,
+  listReportSchedules,
+  createReportSchedule,
+  runReportSchedule,
+  deleteReportSchedule,
+  summariseConversation,
+  autoTagConversation,
+  listBotFlows,
+  createBotFlow,
+  updateBotFlow,
+  deleteBotFlow,
+  listChannels,
+  connectChannel,
+  disconnectChannel,
+  listApps,
+  installApp,
+  testApp,
+  uninstallApp,
+  getSsoConnection,
+  saveSsoConnection,
+  removeSsoConnection,
+  listContacts,
+  listNotifications,
+  listSchedules,
+  saveSchedule,
+  markConversationRead,
+  markNotificationsRead,
+  removeContactTag,
+  updateContact,
   refreshAccessToken,
+  resendEmailVerification,
   setBillingAddon as setBillingAddonRequest,
   setDepartmentAgents as setDepartmentAgentsRequest,
   sendMessage as sendMessageRequest,
@@ -134,13 +173,28 @@ import {
   updateWidgetInstall as updateWidgetInstallRequest,
   uploadAttachment as uploadAttachmentRequest
 } from "@/lib/api";
+import { apiBaseUrl, socketUrl } from "@/lib/api-url";
 import { cn } from "@/lib/cn";
 import { initials } from "@/lib/format";
 import { playChime, primeAudio, requestNotificationPermission, showBrowserNotification, speak } from "@/lib/notify";
 import type { VoiceGender } from "@/lib/notify";
 import { clearSession, readSession, type StoredSession } from "@/lib/session";
 import type {
+  ReportSchedule,
+  ConversationSummary,
+  BotFlow,
+  FlowNode,
+  FlowNodeType,
+  ChannelConnection,
+  MarketplaceApp,
+  MessagingChannelKey,
+  SaveSsoInput,
+  SsoConnection,
+  AgentShift,
   ApiKey,
+  AppNotification,
+  AuditLogEntry,
+  Contact,
   AuthUser,
   AutomationRule,
   BillingInvoice,
@@ -167,6 +221,14 @@ import type {
 
 type IconComponent = ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
 type ChatSocket = Socket;
+
+/**
+ * The HTTP response and the socket "message.created" event both deliver a sent message,
+ * usually socket first; append only once.
+ */
+function appendUniqueMessage(current: Message[], message: Message): Message[] {
+  return current.some((existing) => existing.id === message.id) ? current : [...current, message];
+}
 
 function agentLabel(member?: OrganizationMember): string {
   if (!member) {
@@ -290,6 +352,141 @@ function readIntakeAnalysis(conversation: Conversation | null): IntakeAnalysis |
 }
 
 /** Reseller/agency bar: switch between the client firms you own + provision a new one. */
+interface AskOptions {
+  title: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  /** When given, the dialog shows a list to pick from instead of a text field. */
+  choices?: Array<{ value: string; label: string; hint?: string }>;
+  emptyMessage?: string;
+}
+
+interface AskRequest extends AskOptions {
+  resolve: (value: string | null) => void;
+}
+
+/**
+ * In-app replacement for window.prompt(): the native dialog blocks the whole browser tab
+ * and looks nothing like the product. Returns a promise that resolves with the typed text
+ * (or the chosen value), or null when the user cancels.
+ */
+function useAskDialog(): { ask: (options: AskOptions) => Promise<string | null>; dialog: ReactElement | null } {
+  const [request, setRequest] = useState<AskRequest | null>(null);
+  const [value, setValue] = useState("");
+
+  const ask = useCallback(
+    (options: AskOptions) =>
+      new Promise<string | null>((resolve) => {
+        setValue("");
+        setRequest({ ...options, resolve });
+      }),
+    []
+  );
+
+  const close = useCallback(
+    (result: string | null) => {
+      setRequest((current) => {
+        current?.resolve(result);
+        return null;
+      });
+      setValue("");
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!request) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [request, close]);
+
+  const dialog = request ? (
+    <div
+      className="fixed inset-0 z-[80] grid place-items-center bg-black/50 p-4"
+      onClick={() => close(null)}
+      role="presentation"
+    >
+      <div
+        aria-modal="true"
+        className="w-full max-w-sm rounded-xl bg-white p-5 text-black shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <p className="text-sm font-bold">{request.title}</p>
+
+        {request.choices ? (
+          <div className="mt-3 grid max-h-72 gap-1 overflow-auto">
+            {request.choices.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-500">
+                {request.emptyMessage ?? "Nothing to pick from yet."}
+              </p>
+            ) : (
+              request.choices.map((choice) => (
+                <button
+                  className="rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:border-[#0067ff] hover:bg-[#eef3ff]"
+                  key={choice.value}
+                  onClick={() => close(choice.value)}
+                  type="button"
+                >
+                  <span className="font-semibold">{choice.label}</span>
+                  {choice.hint ? <span className="mt-0.5 block text-xs text-slate-500">{choice.hint}</span> : null}
+                </button>
+              ))
+            )}
+            <button
+              className="mt-2 justify-self-end rounded-md px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100"
+              onClick={() => close(null)}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              close(value.trim() ? value.trim() : null);
+            }}
+          >
+            <input
+              autoFocus
+              className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#0067ff]"
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={request.placeholder ?? ""}
+              value={value}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded-md px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100"
+                onClick={() => close(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-md bg-[#0067ff] px-4 py-2 text-xs font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+                disabled={!value.trim()}
+                type="submit"
+              >
+                {request.confirmLabel ?? "Save"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  return { ask, dialog };
+}
+
 function AgencyBar({
   organizations,
   activeOrganizationId,
@@ -303,6 +500,8 @@ function AgencyBar({
   onSwitch: (id: string) => void;
   onProvision: (name: string) => void;
 }): ReactElement {
+  const { ask, dialog } = useAskDialog();
+
   return (
     <div
       className={cn(
@@ -334,16 +533,22 @@ function AgencyBar({
           isLight ? "bg-[#2f6bff] text-white hover:bg-[#3f78ff]" : "bg-[#2f6bff] text-white hover:bg-[#3f78ff]"
         )}
         onClick={() => {
-          const name = window.prompt("New client firm name (e.g. Smith & Associates):");
-          if (name && name.trim()) {
-            onProvision(name.trim());
-          }
+          void ask({
+            title: "New client firm",
+            placeholder: "e.g. Smith & Associates",
+            confirmLabel: "Create"
+          }).then((name) => {
+            if (name) {
+              onProvision(name);
+            }
+          });
         }}
         type="button"
       >
         + New client firm
       </button>
-      <span className="opacity-50">Legal mode is auto-enabled for new firms.</span>
+      <span className="opacity-50">Turn on legal mode with the Legal add-on in Billing.</span>
+      {dialog}
     </div>
   );
 }
@@ -463,12 +668,14 @@ const secondaryNav: Record<ScreenKey, SecondaryItem[]> = {
   ],
   engage: [
     { label: "Traffic", count: "0", muted: "customers" },
+    { label: "Customers" },
     { label: "Campaigns", count: "5", muted: "active" },
     { label: "Goals", count: "0", muted: "active" }
   ],
   automate: [
     { label: "Overview" },
     { label: "Chatbots" },
+    { label: "Flow builder", badge: "New" },
     { label: "Knowledge hub" },
     { label: "Canned responses" },
     { label: "Routing rules" },
@@ -528,8 +735,7 @@ const secondaryNav: Record<ScreenKey, SecondaryItem[]> = {
   settings: [
     { label: "Install LiveChat", count: "ON" },
     { label: "Email by HelpDesk", count: "OFF" },
-    { label: "Facebook Messenger", count: "OFF" },
-    { label: "Apple Messages", count: "OFF" },
+    { label: "Messaging channels" },
     { label: "Website widget" },
     { label: "Forms" },
     { label: "Engagement" },
@@ -537,7 +743,9 @@ const secondaryNav: Record<ScreenKey, SecondaryItem[]> = {
     { label: "Sales tracker" },
     { label: "Chat settings" },
     { label: "Company details" },
-    { label: "Security" }
+    { label: "Security" },
+    { label: "Single sign-on" },
+    { label: "Audit log" }
   ]
 };
 
@@ -648,6 +856,7 @@ export function DashboardShell() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [widgetInstall, setWidgetInstall] = useState<WidgetInstall | null>(null);
+  const [widgets, setWidgets] = useState<WidgetInstall[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -696,10 +905,13 @@ export function DashboardShell() {
   const [isCreating, setIsCreating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
+  const [carouselModalOpen, setCarouselModalOpen] = useState(false);
   const [cardModalPlan, setCardModalPlan] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showNotifBanner, setShowNotifBanner] = useState(true);
   const selectedConversationIdRef = useRef<string | null>(null);
@@ -723,35 +935,16 @@ export function DashboardShell() {
           getCurrentUser(accessToken),
           listOrganizations(accessToken)
         ]);
-        const primaryOrganization = orgs[0];
-
         setUser(currentUser);
         setOrganizations(orgs);
 
-        if (primaryOrganization) {
-          const [loadedConversations, install, loadedMembers, loadedCanned] = await Promise.all([
-            listConversations(primaryOrganization.id, accessToken, {
-              limit: 50
-            }),
-            getDefaultWidgetInstall(primaryOrganization.id, accessToken),
-            listMembers(primaryOrganization.id, accessToken).catch(() => []),
-            listCannedResponses(primaryOrganization.id, accessToken).catch(() => [])
-          ]);
-          const firstConversation = loadedConversations[0];
-
-          setConversations(loadedConversations);
-          setMembers(loadedMembers);
-          setCannedResponses(loadedCanned);
-          setWidgetInstall(install);
-          setSelectedConversationId(firstConversation?.id ?? null);
-
-          if (firstConversation) {
-            setMessages(await listMessages(primaryOrganization.id, firstConversation.id, accessToken));
-          }
+        // With an organization, loading finishes once its chats are in (see the
+        // active-organization effect below).
+        if (!orgs.length) {
+          setIsLoading(false);
         }
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : "Unable to load workspace");
-      } finally {
         setIsLoading(false);
       }
     }
@@ -1106,6 +1299,85 @@ export function DashboardShell() {
   // Being in the dashboard means you're online — flip the agent ONLINE once on load
   // so the Team "Login status" and auto-routing reflect reality (was stuck "Offline").
   const didSetOnlineRef = useRef(false);
+
+  // Load the chats, team, canned replies and widget install of the ACTIVE organization, and
+  // reload them when a reseller switches firms. Previously this only ran once for orgs[0],
+  // so after switching the dashboard kept showing the first firm's chats and widget key.
+  const activeOrganizationId = activeOrganization?.id;
+  const hasSession = Boolean(session);
+  useEffect(() => {
+    // Read the token at run time rather than depending on it: the token rotates every
+    // 12 minutes and must not wipe the open chat.
+    const accessToken = readSession()?.accessToken;
+    if (!hasSession || !accessToken || !activeOrganizationId) {
+      return;
+    }
+
+    let cancelled = false;
+    setConversations([]);
+    setMessages([]);
+    setMembers([]);
+    setCannedResponses([]);
+    setWidgetInstall(null);
+    setSelectedConversationId(null);
+    setUnread({});
+    setVisitorTyping(null);
+    didSetOnlineRef.current = false;
+
+    async function loadOrganizationData(organizationId: string, token: string) {
+      try {
+        const [loadedConversations, install, loadedMembers, loadedCanned] = await Promise.all([
+          listConversations(organizationId, token, { limit: 50 }),
+          listWidgets(organizationId, token).catch(async () => [
+            await getDefaultWidgetInstall(organizationId, token)
+          ]),
+          listMembers(organizationId, token).catch(() => []),
+          listCannedResponses(organizationId, token).catch(() => [])
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        const firstConversation = loadedConversations[0];
+        setConversations(loadedConversations);
+        setMembers(loadedMembers);
+        setCannedResponses(loadedCanned);
+        setWidgets(install);
+        setWidgetInstall(install[0] ?? null);
+        setSelectedConversationId(firstConversation?.id ?? null);
+
+        if (firstConversation) {
+          const loadedMessages = await listMessages(organizationId, firstConversation.id, token);
+          if (!cancelled) {
+            setMessages(loadedMessages);
+          }
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Unable to load workspace");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadOrganizationData(activeOrganizationId, accessToken);
+    void listNotifications(activeOrganizationId, accessToken)
+      .then((result) => {
+        if (!cancelled) {
+          setNotifications(result.items);
+          setUnreadNotifications(result.unread);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrganizationId, hasSession]);
+
   useEffect(() => {
     if (didSetOnlineRef.current || !session || !activeOrganization || !user) {
       return;
@@ -1140,7 +1412,25 @@ export function DashboardShell() {
     new Map(conversations.map((conversation) => [conversation.id, conversation])).values()
   );
 
+  const myMembershipId = members.find((member) => member.userId === user?.id)?.id ?? null;
   const filteredConversations = uniqueConversations.filter((conversation) => {
+    // The left rail tabs narrow the list: chats handled by other agents (supervision) or waiting.
+    if (activeScreen === "chats") {
+      if (activeSecondary === "Supervised") {
+        if (!conversation.assignedAgentId || conversation.assignedAgentId === myMembershipId) {
+          return false;
+        }
+      } else if (activeSecondary === "Queued") {
+        if (conversation.status !== "QUEUED") {
+          return false;
+        }
+      } else if (activeSecondary === "Messaging channels") {
+        if (conversation.source === "WIDGET") {
+          return false;
+        }
+      }
+    }
+
     const query = searchQuery.trim().toLowerCase();
 
     if (!query) {
@@ -1157,6 +1447,28 @@ export function DashboardShell() {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   });
+
+  // Left-rail counts come from live data, not placeholders.
+  const archivedCount = uniqueConversations.filter((conversation) =>
+    ["RESOLVED", "CLOSED"].includes(conversation.status)
+  ).length;
+  const sidebarCounts: Record<string, string> = {
+    "All chats": String(uniqueConversations.length),
+    "Messaging channels": String(uniqueConversations.filter((c) => c.source !== "WIDGET").length),
+    Supervised: String(
+      uniqueConversations.filter((c) => c.assignedAgentId && c.assignedAgentId !== myMembershipId).length
+    ),
+    Queued: String(uniqueConversations.filter((c) => c.status === "QUEUED").length),
+    "Chat archives": String(archivedCount),
+    Agents: String(members.length),
+    Campaigns: String(campaigns.length),
+    Goals: String(goals.length),
+    Traffic: String(liveVisitors.length),
+    Customers: String(report?.customers.total ?? 0),
+    "Last 7 days": String(report?.engagement.chats ?? 0),
+    "All tickets": String(tickets.length),
+    "Tickets home": String(tickets.filter((ticket) => ticket.status !== "CLOSED").length)
+  };
 
   const openCount = conversations.filter((conversation) =>
     ["QUEUED", "OPEN", "PENDING"].includes(conversation.status)
@@ -1278,13 +1590,47 @@ export function DashboardShell() {
       }
 
       if (message.conversationId === selectedConversationIdRef.current) {
-        setMessages((current) =>
-          current.some((existingMessage) => existingMessage.id === message.id)
-            ? current
-            : [...current, message]
-        );
+        setMessages((current) => appendUniqueMessage(current, message));
       }
     });
+
+    socket.on("notification.created", (payload: { notification?: AppNotification }) => {
+      if (!payload.notification) {
+        return;
+      }
+      setNotifications((current) => [payload.notification as AppNotification, ...current].slice(0, 30));
+      setUnreadNotifications((current) => current + 1);
+    });
+
+    socket.on(
+      "messages.read",
+      (payload: { conversationId?: string; messageIds?: string[]; reader?: string }) => {
+        if (!payload.conversationId || !payload.messageIds?.length) {
+          return;
+        }
+
+        const readIds = new Set(payload.messageIds);
+        setMessages((current) =>
+          current.some((message) => readIds.has(message.id))
+            ? current.map((message) =>
+                readIds.has(message.id) ? { ...message, status: "READ" } : message
+              )
+            : current
+        );
+
+        // The visitor read our messages → drop the unread badge for that chat.
+        if (payload.reader === "AGENT") {
+          setUnread((current) => {
+            if (!current[payload.conversationId as string]) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[payload.conversationId as string];
+            return next;
+          });
+        }
+      }
+    );
 
     socket.on(
       "typing.updated",
@@ -1393,6 +1739,10 @@ export function DashboardShell() {
 
     try {
       setMessages(await listMessages(activeOrganization.id, conversation.id, session.accessToken));
+      // Read receipt: the visitor's widget shows "Seen" once this lands.
+      void markConversationRead(activeOrganization.id, conversation.id, session.accessToken).catch(
+        () => {}
+      );
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to load messages");
     } finally {
@@ -1473,7 +1823,7 @@ export function DashboardShell() {
         { body, visibility: internal ? "INTERNAL" : "PUBLIC", type: "TEXT" }
       );
 
-      setMessages((current) => [...current, message]);
+      setMessages((current) => appendUniqueMessage(current, message));
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === selectedConversation.id
@@ -1489,6 +1839,57 @@ export function DashboardShell() {
       return true;
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to send message");
+      return false;
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  /** Send several cards at once — plans, products or articles the visitor can swipe. */
+  async function handleSendCarousel(cards: CarouselCard[]) {
+    if (!session || !activeOrganization || !selectedConversation) {
+      setNotice("Open a conversation first.");
+      return false;
+    }
+
+    const usable = cards.filter((card) => card.title.trim());
+
+    if (!usable.length) {
+      setError("Give at least one card a title.");
+      return false;
+    }
+
+    setIsSending(true);
+    setError("");
+
+    try {
+      const message = await sendMessageRequest(
+        activeOrganization.id,
+        selectedConversation.id,
+        session.accessToken,
+        {
+          body: usable.map((card) => card.title.trim()).join(" · "),
+          visibility: "PUBLIC",
+          type: "TEXT",
+          metadata: {
+            carousel: {
+              cards: usable.map((card) => ({
+                title: card.title.trim(),
+                ...(card.subtitle.trim() ? { subtitle: card.subtitle.trim() } : {}),
+                ...(card.image.trim() ? { image: card.image.trim() } : {}),
+                ...(card.buttonLabel.trim() ? { buttonLabel: card.buttonLabel.trim() } : {}),
+                ...(card.buttonUrl.trim() ? { buttonUrl: card.buttonUrl.trim() } : {})
+              }))
+            }
+          }
+        }
+      );
+
+      setMessages((current) => appendUniqueMessage(current, message));
+      setNotice(`Carousel with ${usable.length} card${usable.length === 1 ? "" : "s"} sent.`);
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to send the carousel");
       return false;
     } finally {
       setIsSending(false);
@@ -1534,7 +1935,7 @@ export function DashboardShell() {
         }
       );
 
-      setMessages((current) => [...current, message]);
+      setMessages((current) => appendUniqueMessage(current, message));
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === selectedConversation.id
@@ -1733,6 +2134,23 @@ export function DashboardShell() {
     }
   }
 
+  async function handleResendVerification() {
+    const session = readSession();
+    if (!session) {
+      return;
+    }
+    try {
+      const result = await resendEmailVerification(session.accessToken);
+      setNotice(
+        result.success
+          ? "Confirmation email sent — check your inbox."
+          : "Email isn't set up on the server, so the confirmation couldn't be sent."
+      );
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not resend the email");
+    }
+  }
+
   async function handleInviteAgent(email: string) {
     if (!session || !activeOrganization) {
       return false;
@@ -1746,7 +2164,11 @@ export function DashboardShell() {
         const link = `${window.location.origin}/invite/${invitation.token}`;
         setInviteLink(link);
         await navigator.clipboard.writeText(link).catch(() => {});
-        setNotice(`Invite link copied — share it with ${email}.`);
+        setNotice(
+          invitation.emailSent
+            ? `Invitation email sent to ${email}. The link is also copied if you want to share it directly.`
+            : `Email isn't set up on the server, so no email was sent. Invite link copied — share it with ${email}.`
+        );
       } else {
         setNotice(`Invitation sent to ${email}.`);
       }
@@ -1977,7 +2399,9 @@ export function DashboardShell() {
       const created = await provisionClientOrgRequest(session.accessToken, name.trim());
       setOrganizations((current) => [...current, created]);
       setActiveOrgId(created.id);
-      setNotice(`Client firm "${created.name}" created — legal mode is on. Switched to it.`);
+      setNotice(
+        `Client firm "${created.name}" created and selected. Enable the Legal add-on in Billing to turn on legal mode.`
+      );
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to create client firm");
     }
@@ -2558,6 +2982,7 @@ export function DashboardShell() {
     workingHours?: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> };
     eyeCatcher?: string;
     eyeCatcherEnabled?: boolean;
+    eyeCatcherTheme?: string;
     slackWebhookUrl?: string;
     preChatFields?: Array<{ id: string; label: string; type: string; required: boolean }>;
     postChatEnabled?: boolean;
@@ -2578,14 +3003,89 @@ export function DashboardShell() {
       const updated = await updateWidgetInstallRequest(
         activeOrganization.id,
         session.accessToken,
-        input
+        input,
+        widgetInstall?.id
       );
       setWidgetInstall(updated);
+      setWidgets((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setNotice("Widget settings saved.");
       return true;
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to save widget settings");
       return false;
+    }
+  }
+
+  async function handleAddWidget(name: string) {
+    if (!session || !activeOrganization) {
+      return false;
+    }
+    setError("");
+
+    try {
+      const created = await createWidget(activeOrganization.id, session.accessToken, name);
+      setWidgets((current) => [...current, created]);
+      setWidgetInstall(created);
+      setNotice(`"${created.name}" added — copy its install code onto that website.`);
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to add the widget");
+      return false;
+    }
+  }
+
+  async function handleDeleteWidget(widgetId: string) {
+    if (!session || !activeOrganization) {
+      return false;
+    }
+    setError("");
+
+    try {
+      await deleteWidget(activeOrganization.id, widgetId, session.accessToken);
+      const remaining = widgets.filter((item) => item.id !== widgetId);
+      setWidgets(remaining);
+      setWidgetInstall((current) => (current?.id === widgetId ? remaining[0] ?? null : current));
+      setNotice("Widget removed. Its past chats are still in Archives.");
+      return true;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to remove the widget");
+      return false;
+    }
+  }
+
+  function handleSelectWidget(widgetId: string) {
+    const picked = widgets.find((item) => item.id === widgetId);
+    if (picked) {
+      setWidgetInstall(picked);
+    }
+  }
+
+  async function handleSummariseConversation(conversationId: string) {
+    if (!session || !activeOrganization) {
+      return null;
+    }
+    try {
+      return await summariseConversation(activeOrganization.id, conversationId, session.accessToken);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not summarise this chat");
+      return null;
+    }
+  }
+
+  async function handleAutoTagConversation(conversationId: string) {
+    if (!session || !activeOrganization) {
+      return;
+    }
+    try {
+      const result = await autoTagConversation(activeOrganization.id, conversationId, session.accessToken);
+      setNotice(
+        result.tags.length ? `Tagged: ${result.tags.join(", ")}.` : "No clear topic found for this chat."
+      );
+      await listConversations(activeOrganization.id, session.accessToken, { limit: 50 })
+        .then(setConversations)
+        .catch(() => {});
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not tag this chat");
     }
   }
 
@@ -2813,6 +3313,29 @@ export function DashboardShell() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-black text-white">
+      {billing?.entitlements && !billing.entitlements.active && (
+        <div className="flex flex-wrap items-center justify-center gap-3 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">
+          <span>{billing.entitlements.message ?? "Your chat widget is paused."}</span>
+          <button
+            className="rounded-md bg-white px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-white/90"
+            onClick={() => {
+              setActiveScreen("billing");
+              setActiveSecondary("Subscription");
+            }}
+            type="button"
+          >
+            Open billing
+          </button>
+        </div>
+      )}
+
+      {user && !user.emailVerified && (
+        <VerifyEmailBanner
+          email={user.email}
+          onResend={() => void handleResendVerification()}
+        />
+      )}
+
       {showNotifBanner && (
         <NeverMissBanner
           onClose={() => setShowNotifBanner(false)}
@@ -2826,6 +3349,7 @@ export function DashboardShell() {
       <GlobalTopBar
         bannerVisible={showNotifBanner}
         isNotificationOpen={isNotificationOpen}
+        unreadNotifications={unreadNotifications}
         onCreateChat={() => void handleCreateConversation()}
         onSearchChange={(value) => {
           setSearchQuery(value);
@@ -2855,6 +3379,7 @@ export function DashboardShell() {
         />
 
         <SecondaryNav
+          counts={sidebarCounts}
           activeLabel={activeSecondary}
           activeScreen={activeScreen}
           isOpen={isMobileMenuOpen}
@@ -2954,11 +3479,14 @@ export function DashboardShell() {
 
               {activeScreen === "chats" && (
                 <ChatsScreen
+                  onRequestSummary={handleSummariseConversation}
+                  onRequestAutoTag={handleAutoTagConversation}
                   cannedResponses={cannedResponses}
                   chatLink={chatLink}
                   composer={composer}
                   connection={connection}
                   conversations={filteredConversations}
+                  myMembershipId={myMembershipId}
                   onSaveCannedResponse={handleSaveCannedResponse}
                   onTyping={handleAgentTyping}
                   onUpdateTags={(tags) => void handleUpdateTags(tags)}
@@ -2985,6 +3513,7 @@ export function DashboardShell() {
                   onSendMessage={(event) => void handleSendMessage(event)}
                   onSendNote={() => void handleSendNote()}
                   onSendProduct={() => setProductModalOpen(true)}
+                  onSendCarousel={() => setCarouselModalOpen(true)}
                   onUpdateStatus={(status) => void handleUpdateConversationStatus(status)}
                   selectedConversation={selectedConversation}
                   setComposer={setComposer}
@@ -3003,6 +3532,15 @@ export function DashboardShell() {
                   typingPreviews={visitorPreviews}
                   voiceAlert={voiceAlert}
                   onChangeVoiceAlert={setVoiceAlert}
+                />
+              )}
+
+              {activeScreen === "engage" && activeSecondary === "Customers" && (
+                <CustomersScreen
+                  accessToken={session?.accessToken ?? null}
+                  onAction={handleAction}
+                  onOpenConversation={handleOpenConversationById}
+                  organizationId={activeOrganization?.id ?? null}
                 />
               )}
 
@@ -3059,6 +3597,14 @@ export function DashboardShell() {
                 />
               )}
 
+              {activeScreen === "automate" && activeSecondary === "Flow builder" && (
+                <BotFlowBuilderScreen
+                  accessToken={session?.accessToken ?? null}
+                  onAction={handleAction}
+                  organizationId={activeOrganization?.id ?? null}
+                />
+              )}
+
               {activeScreen === "automate" && activeSecondary === "Chatbots" && (
                 <ChatbotFlowBuilder
                   menuOptions={widgetInstall?.menuOptions ?? []}
@@ -3074,6 +3620,7 @@ export function DashboardShell() {
                 activeSecondary !== "Overview" &&
                 activeSecondary !== "Canned responses" &&
                 activeSecondary !== "Knowledge hub" &&
+                activeSecondary !== "Flow builder" &&
                 activeSecondary !== "Chatbots" && (
                   <AutomateScreen
                     heading={activeSecondary}
@@ -3095,7 +3642,16 @@ export function DashboardShell() {
                 />
               )}
 
-              {activeScreen === "team" && (
+              {activeScreen === "team" && activeSecondary === "Work scheduler" && (
+                <WorkSchedulerScreen
+                  accessToken={session?.accessToken ?? null}
+                  members={members}
+                  onAction={handleAction}
+                  organizationId={activeOrganization?.id ?? null}
+                />
+              )}
+
+              {activeScreen === "team" && activeSecondary !== "Work scheduler" && (
                 <TeamScreen
                   departments={departments}
                   inviteLink={inviteLink}
@@ -3111,7 +3667,14 @@ export function DashboardShell() {
               )}
 
               {activeScreen === "reports" && (
-                <ReportsScreen members={members} report={report} view={activeSecondary} />
+                <ReportsScreen
+                  accessToken={session?.accessToken ?? null}
+                  members={members}
+                  onAction={handleAction}
+                  organizationId={activeOrganization?.id ?? null}
+                  report={report}
+                  view={activeSecondary}
+                />
               )}
 
               {activeScreen === "apps" &&
@@ -3128,7 +3691,11 @@ export function DashboardShell() {
                   webhooks={webhooks}
                 />
               ) : activeScreen === "apps" ? (
-                <AppsScreen onAction={handleAction} />
+                <AppsScreen
+                  accessToken={session?.accessToken ?? null}
+                  onAction={handleAction}
+                  organizationId={activeOrganization?.id ?? null}
+                />
               ) : null}
 
               {activeScreen === "tickets" && (
@@ -3154,7 +3721,9 @@ export function DashboardShell() {
 
               {activeScreen === "settings" && (
                 <SettingsScreen
+                  accessToken={session?.accessToken ?? null}
                   activeSecondary={activeSecondary}
+                  organizationId={activeOrganization?.id ?? null}
                   onAction={handleAction}
                   onClearVisitorData={() => void handleClearVisitorData()}
                   onCopy={handleCopy}
@@ -3163,6 +3732,10 @@ export function DashboardShell() {
                   onUpdateWidget={handleUpdateWidget}
                   organization={activeOrganization ?? null}
                   widgetInstall={widgetInstall}
+                  widgets={widgets}
+                  onAddWidget={handleAddWidget}
+                  onDeleteWidget={handleDeleteWidget}
+                  onSelectWidget={handleSelectWidget}
                 />
               )}
             </div>
@@ -3191,7 +3764,29 @@ export function DashboardShell() {
       )}
 
       {isNotificationOpen && (
-        <NotificationPanel onClose={() => setIsNotificationOpen(false)} />
+        <NotificationPanel
+          notifications={notifications}
+          onClose={() => setIsNotificationOpen(false)}
+          onOpenConversation={(conversationId) => {
+            setIsNotificationOpen(false);
+            handleOpenConversationById(conversationId);
+          }}
+          onMarkAllRead={() => {
+            const session = readSession();
+            if (!session || !activeOrganization) {
+              return;
+            }
+            void markNotificationsRead(activeOrganization.id, session.accessToken)
+              .then(() => {
+                setUnreadNotifications(0);
+                setNotifications((current) =>
+                  current.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() }))
+                );
+              })
+              .catch(() => {});
+          }}
+          unread={unreadNotifications}
+        />
       )}
 
       {revealedSecret && (
@@ -3200,6 +3795,19 @@ export function DashboardShell() {
           onClose={() => setRevealedSecret(null)}
           onCopy={handleCopy}
           secret={revealedSecret.secret}
+        />
+      )}
+
+      {carouselModalOpen && (
+        <CarouselModal
+          isSending={isSending}
+          onClose={() => setCarouselModalOpen(false)}
+          onSubmit={async (cards) => {
+            const ok = await handleSendCarousel(cards);
+            if (ok) {
+              setCarouselModalOpen(false);
+            }
+          }}
         />
       )}
 
@@ -3549,6 +4157,568 @@ function ProductCardModal({
   );
 }
 
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+function minutesToTime(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map((part) => Number(part));
+  return (hours ?? 0) * 60 + (minutes ?? 0);
+}
+
+/** Weekly working hours per agent. Routing skips agents who are off shift. */
+function WorkSchedulerScreen({
+  accessToken,
+  members,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  members: OrganizationMember[];
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [schedules, setSchedules] = useState<Record<string, AgentShift[]>>({});
+  const [selectedMember, setSelectedMember] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    void listSchedules(organizationId, accessToken)
+      .then((rows) => {
+        if (cancelled) return;
+        const map: Record<string, AgentShift[]> = {};
+        for (const row of rows) {
+          map[row.membershipId] = row.shifts;
+        }
+        setSchedules(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  useEffect(() => {
+    if (!selectedMember && members[0]) {
+      setSelectedMember(members[0].id);
+    }
+  }, [members, selectedMember]);
+
+  const shifts = selectedMember ? (schedules[selectedMember] ?? []) : [];
+
+  function updateShifts(next: AgentShift[]) {
+    if (!selectedMember) return;
+    setSchedules((current) => ({ ...current, [selectedMember]: next }));
+  }
+
+  async function save() {
+    if (!accessToken || !organizationId || !selectedMember) return;
+    setIsSaving(true);
+    try {
+      await saveSchedule(organizationId, selectedMember, accessToken, shifts);
+      onAction("Working hours saved.");
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not save the schedule");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-h-full bg-white p-6 text-black">
+      <div className="mx-auto max-w-3xl">
+        <h2 className="text-lg font-bold">Work scheduler</h2>
+        <p className="mb-5 mt-1 text-sm text-slate-500">
+          New chats are only routed to an agent during their working hours. An agent with no hours set is
+          treated as always available.
+        </p>
+
+        <label className="mb-4 grid max-w-sm gap-1 text-xs font-semibold text-slate-600">
+          Agent
+          <select
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#0067ff]"
+            onChange={(event) => setSelectedMember(event.target.value)}
+            value={selectedMember}
+          >
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {agentLabel(member)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="grid gap-2">
+          {WEEKDAYS.map((day, dayIndex) => {
+            const dayShift = shifts.find((shift) => shift.dayOfWeek === dayIndex);
+
+            return (
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-3 py-2" key={day}>
+                <label className="flex w-40 items-center gap-2 text-sm font-semibold">
+                  <input
+                    checked={Boolean(dayShift)}
+                    onChange={(event) => {
+                      updateShifts(
+                        event.target.checked
+                          ? [...shifts, { dayOfWeek: dayIndex, startMinute: 540, endMinute: 1020 }]
+                          : shifts.filter((shift) => shift.dayOfWeek !== dayIndex)
+                      );
+                    }}
+                    type="checkbox"
+                  />
+                  {day}
+                </label>
+
+                {dayShift ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <input
+                      className="rounded-md border border-slate-300 px-2 py-1"
+                      onChange={(event) =>
+                        updateShifts(
+                          shifts.map((shift) =>
+                            shift.dayOfWeek === dayIndex
+                              ? { ...shift, startMinute: timeToMinutes(event.target.value) }
+                              : shift
+                          )
+                        )
+                      }
+                      type="time"
+                      value={minutesToTime(dayShift.startMinute)}
+                    />
+                    <span className="text-slate-400">to</span>
+                    <input
+                      className="rounded-md border border-slate-300 px-2 py-1"
+                      onChange={(event) =>
+                        updateShifts(
+                          shifts.map((shift) =>
+                            shift.dayOfWeek === dayIndex
+                              ? { ...shift, endMinute: timeToMinutes(event.target.value) }
+                              : shift
+                          )
+                        )
+                      }
+                      type="time"
+                      value={minutesToTime(dayShift.endMinute)}
+                    />
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-400">Off</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <button
+          className="mt-4 rounded-md bg-[#0067ff] px-4 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-60"
+          disabled={isSaving || !selectedMember}
+          onClick={() => void save()}
+          type="button"
+        >
+          {isSaving ? "Saving…" : "Save working hours"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** CRM: searchable customer list with details, notes and tags. */
+function CustomersScreen({
+  accessToken,
+  onAction,
+  onOpenConversation,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  onOpenConversation: (conversationId: string) => void;
+  organizationId: string | null;
+}) {
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selected, setSelected] = useState<Contact | null>(null);
+  const [search, setSearch] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [note, setNote] = useState("");
+  const [tag, setTag] = useState("");
+  const [form, setForm] = useState({ name: "", email: "", phone: "", company: "" });
+  const [isCreating, setIsCreating] = useState(false);
+
+  const reload = useCallback(
+    async (query: string) => {
+      if (!accessToken || !organizationId) {
+        return;
+      }
+      setIsLoading(true);
+      try {
+        setContacts(await listContacts(organizationId, accessToken, query ? { search: query } : {}));
+      } catch (error) {
+        onAction(error instanceof Error ? error.message : "Could not load customers");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [accessToken, organizationId, onAction]
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => void reload(search), 250);
+    return () => clearTimeout(timer);
+  }, [reload, search]);
+
+  async function openContact(contactId: string) {
+    if (!accessToken || !organizationId) return;
+    try {
+      setSelected(await getContact(organizationId, contactId, accessToken));
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not open the customer");
+    }
+  }
+
+  async function run(action: () => Promise<Contact>, message: string) {
+    try {
+      const updated = await action();
+      setSelected(updated);
+      setContacts((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      onAction(message);
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "That didn't work");
+    }
+  }
+
+  const field = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#0067ff]";
+
+  return (
+    <div className="grid min-h-full gap-4 bg-white p-6 text-black lg:grid-cols-[minmax(260px,360px)_1fr]">
+      <div className="grid content-start gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">Customers</h2>
+          <button
+            className="rounded-md bg-[#0067ff] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0050c7]"
+            onClick={() => setIsCreating((current) => !current)}
+            type="button"
+          >
+            {isCreating ? "Cancel" : "+ New customer"}
+          </button>
+        </div>
+
+        {isCreating ? (
+          <form
+            className="grid gap-2 rounded-lg border border-slate-200 p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!accessToken || !organizationId) return;
+              void createContact(organizationId, accessToken, form)
+                .then((created) => {
+                  setSelected(created);
+                  setIsCreating(false);
+                  setForm({ name: "", email: "", phone: "", company: "" });
+                  onAction("Customer added.");
+                  return reload(search);
+                })
+                .catch((error: unknown) =>
+                  onAction(error instanceof Error ? error.message : "Could not add the customer")
+                );
+            }}
+          >
+            <input className={field} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" value={form.name} />
+            <input className={field} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="Email" type="email" value={form.email} />
+            <input className={field} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone" value={form.phone} />
+            <input className={field} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Company" value={form.company} />
+            <button className="rounded-md bg-[#111214] px-3 py-2 text-xs font-bold text-white" type="submit">
+              Save customer
+            </button>
+          </form>
+        ) : null}
+
+        <input
+          className={field}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search name, email, phone or company"
+          value={search}
+        />
+
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          {isLoading ? (
+            <p className="px-3 py-6 text-center text-sm text-slate-500">Loading…</p>
+          ) : contacts.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-slate-500">
+              No customers yet. They are created automatically when a visitor shares their email.
+            </p>
+          ) : (
+            contacts.map((contact) => (
+              <button
+                className={cn(
+                  "grid w-full gap-0.5 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50",
+                  selected?.id === contact.id && "bg-slate-100"
+                )}
+                key={contact.id}
+                onClick={() => void openContact(contact.id)}
+                type="button"
+              >
+                <span className="text-sm font-semibold">{contact.name ?? contact.email ?? "Unnamed"}</span>
+                <span className="text-xs text-slate-500">
+                  {contact.email ?? contact.phone ?? "No contact details"} · {contact.conversationCount} chat
+                  {contact.conversationCount === 1 ? "" : "s"}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 p-4">
+        {!selected ? (
+          <p className="py-16 text-center text-sm text-slate-500">Pick a customer to see their details.</p>
+        ) : (
+          <div className="grid gap-4">
+            <form
+              className="grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!accessToken || !organizationId) return;
+                const data = new FormData(event.currentTarget);
+                void run(
+                  () =>
+                    updateContact(organizationId, selected.id, accessToken, {
+                      name: String(data.get("name") ?? ""),
+                      email: String(data.get("email") ?? ""),
+                      phone: String(data.get("phone") ?? ""),
+                      company: String(data.get("company") ?? "")
+                    }),
+                  "Customer updated."
+                );
+              }}
+            >
+              <input className={field} defaultValue={selected.name ?? ""} key={`n${selected.id}`} name="name" placeholder="Name" />
+              <input className={field} defaultValue={selected.email ?? ""} key={`e${selected.id}`} name="email" placeholder="Email" />
+              <input className={field} defaultValue={selected.phone ?? ""} key={`p${selected.id}`} name="phone" placeholder="Phone" />
+              <input className={field} defaultValue={selected.company ?? ""} key={`c${selected.id}`} name="company" placeholder="Company" />
+              <button className="rounded-md bg-[#0067ff] px-3 py-2 text-xs font-bold text-white sm:col-span-2" type="submit">
+                Save changes
+              </button>
+            </form>
+
+            <div className="grid gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Tags</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {selected.tags.map((name) => (
+                  <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs" key={name}>
+                    {name}
+                    <button
+                      className="text-slate-400 hover:text-red-600"
+                      onClick={() => {
+                        if (!accessToken || !organizationId) return;
+                        void run(() => removeContactTag(organizationId, selected.id, accessToken, name), "Tag removed.");
+                      }}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <form
+                  className="flex gap-1"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!accessToken || !organizationId || !tag.trim()) return;
+                    void run(() => addContactTag(organizationId, selected.id, accessToken, tag.trim()), "Tag added.");
+                    setTag("");
+                  }}
+                >
+                  <input
+                    className="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-[#0067ff]"
+                    onChange={(event) => setTag(event.target.value)}
+                    placeholder="+ tag"
+                    value={tag}
+                  />
+                </form>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Notes ({selected.notes.length})
+              </p>
+              <form
+                className="flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!accessToken || !organizationId || !note.trim()) return;
+                  void run(() => addContactNote(organizationId, selected.id, accessToken, note.trim()), "Note saved.");
+                  setNote("");
+                }}
+              >
+                <input className={field} onChange={(event) => setNote(event.target.value)} placeholder="Add a private note" value={note} />
+                <button className="rounded-md bg-[#111214] px-3 py-2 text-xs font-bold text-white" type="submit">
+                  Add
+                </button>
+              </form>
+              {selected.notes.map((entry) => (
+                <div className="rounded-md border border-slate-200 px-3 py-2 text-sm" key={entry.id}>
+                  <p>{entry.body}</p>
+                  <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                    {entry.authorName ?? "Someone"} · {new Date(entry.createdAt).toLocaleString()}
+                    <button
+                      className="hover:text-red-600"
+                      onClick={() => {
+                        if (!accessToken || !organizationId) return;
+                        void run(
+                          () => deleteContactNote(organizationId, selected.id, entry.id, accessToken),
+                          "Note deleted."
+                        );
+                      }}
+                      type="button"
+                    >
+                      delete
+                    </button>
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-slate-500">
+              {selected.conversationCount} chat{selected.conversationCount === 1 ? "" : "s"}
+              {selected.lastConversationAt
+                ? ` · last on ${new Date(selected.lastConversationAt).toLocaleDateString()}`
+                : ""}
+              {" · "}
+              <button className="underline" onClick={() => onOpenConversation("")} type="button">
+                Open chats
+              </button>
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AuditLogPanel({
+  accessToken,
+  organizationId
+}: {
+  accessToken: string | null;
+  organizationId: string | null;
+}) {
+  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [filter, setFilter] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    listAuditLogs(organizationId, accessToken, { ...(filter ? { action: filter } : {}), limit: 100 })
+      .then((result) => {
+        if (cancelled) return;
+        setEntries(result.items);
+        setTotal(result.total);
+        setError("");
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) setError(caughtError instanceof Error ? caughtError.message : "Could not load the audit log");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId, filter]);
+
+  const filters = [
+    ["", "All"],
+    ["auth", "Sign-ins"],
+    ["member", "Members"],
+    ["role", "Roles"],
+    ["billing", "Billing"],
+    ["data", "Data"]
+  ] as const;
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap gap-2">
+        {filters.map(([value, label]) => (
+          <button
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold",
+              filter === value ? "border-[#0067ff] bg-[#0067ff] text-white" : "border-slate-300 text-slate-600 hover:bg-slate-100"
+            )}
+            key={label}
+            onClick={() => setFilter(value)}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {error ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+
+      <div className="overflow-hidden rounded-lg border border-slate-200">
+        <div className="grid grid-cols-[150px_150px_1fr_110px] bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+          <span>When</span>
+          <span>Who</span>
+          <span>Action</span>
+          <span>IP</span>
+        </div>
+        {isLoading ? (
+          <p className="px-3 py-6 text-center text-sm text-slate-500">Loading…</p>
+        ) : entries.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-slate-500">Nothing recorded yet.</p>
+        ) : (
+          entries.map((entry) => (
+            <div className="grid grid-cols-[150px_150px_1fr_110px] items-start border-t border-slate-100 px-3 py-2 text-xs" key={entry.id}>
+              <span className="text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
+              <span className="truncate text-slate-700" title={entry.actorEmail ?? ""}>
+                {entry.actorName ?? entry.actorEmail ?? "System"}
+              </span>
+              <span className="text-slate-900">
+                <b>{entry.action}</b>
+                {Object.keys(entry.payload).length ? (
+                  <span className="ml-2 text-slate-500">{JSON.stringify(entry.payload).slice(0, 120)}</span>
+                ) : null}
+              </span>
+              <span className="text-slate-400">{entry.ipAddress ?? "—"}</span>
+            </div>
+          ))
+        )}
+      </div>
+      <p className="text-xs text-slate-500">{total} entries recorded.</p>
+    </div>
+  );
+}
+
+function VerifyEmailBanner({ email, onResend }: { email: string; onResend: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 bg-amber-500 px-3 py-1.5 text-xs font-semibold text-black">
+      <span>
+        Confirm your email ({email}) — we sent you a link. You can keep working meanwhile; confirming
+        secures your account and lets you reset your password.
+      </span>
+      <button
+        className="rounded-md bg-black/85 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-black"
+        onClick={onResend}
+        type="button"
+      >
+        Resend email
+      </button>
+    </div>
+  );
+}
+
 function NeverMissBanner({ onClose, onEnable }: { onClose: () => void; onEnable: () => void }) {
   return (
     <div className="fixed inset-x-0 top-0 z-40 flex h-6 items-center justify-center gap-3 bg-[#0a84ff] px-3 text-xs font-semibold text-white">
@@ -3576,6 +4746,7 @@ function NeverMissBanner({ onClose, onEnable }: { onClose: () => void; onEnable:
 function GlobalTopBar({
   bannerVisible,
   isNotificationOpen,
+  unreadNotifications,
   onCreateChat,
   onSearchChange,
   onToggleNotifications,
@@ -3585,6 +4756,7 @@ function GlobalTopBar({
 }: {
   bannerVisible: boolean;
   isNotificationOpen: boolean;
+  unreadNotifications: number;
   onCreateChat: () => void;
   onSearchChange: (value: string) => void;
   onToggleNotifications: () => void;
@@ -3626,9 +4798,11 @@ function GlobalTopBar({
           type="button"
         >
           <Bell className="h-4 w-4" aria-hidden />
-          <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-red-600 text-[10px] font-bold">
-            1
-          </span>
+          {unreadNotifications > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-red-600 text-[10px] font-bold">
+              {unreadNotifications > 9 ? "9+" : unreadNotifications}
+            </span>
+          )}
         </button>
         <button
           className="grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-[#1f1f23]"
@@ -3711,11 +4885,13 @@ function IconRail({
 }
 
 function SecondaryNav({
+  counts,
   activeLabel,
   activeScreen,
   isOpen,
   onSelect
 }: {
+  counts: Record<string, string>;
   activeLabel: string;
   activeScreen: ScreenKey;
   isOpen: boolean;
@@ -3732,7 +4908,9 @@ function SecondaryNav({
     >
       <h2 className="mb-6 px-2 text-lg font-bold">{activePrimary.label}</h2>
       <nav className="space-y-1">
-        {secondaryNav[activeScreen].map((item) => (
+        {secondaryNav[activeScreen].map((item) => {
+          const count = counts[item.label] ?? item.count;
+          return (
           <button
             className={cn(
               "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-semibold text-white/80 transition hover:bg-[#2f2f2f] hover:text-white",
@@ -3749,22 +4927,23 @@ function SecondaryNav({
                 <span className="rounded bg-violet-700 px-1.5 py-0.5 text-[10px]">{item.badge}</span>
               )}
             </span>
-            {item.count && (
+            {count && (
               <span
                 className={cn(
                   "ml-2 rounded-full px-2 py-0.5 text-xs",
-                  item.count === "ON"
+                  count === "ON"
                     ? "text-emerald-400"
-                    : item.count === "OFF"
+                    : count === "OFF"
                       ? "text-slate-400"
                       : "bg-slate-600 text-white"
                 )}
               >
-                {item.count}
+                {count}
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );
@@ -3972,11 +5151,14 @@ function OverviewScreen({
 }
 
 function ChatsScreen({
+  onRequestSummary,
+  onRequestAutoTag,
   cannedResponses,
   chatLink,
   composer,
   connection,
   conversations,
+  myMembershipId,
   isCreating,
   isMessagesLoading,
   isSending,
@@ -3995,6 +5177,7 @@ function ChatsScreen({
   onSendMessage,
   onSendNote,
   onSendProduct,
+  onSendCarousel,
   onTyping,
   onUpdateStatus,
   onUpdateTags,
@@ -4004,11 +5187,14 @@ function ChatsScreen({
   unread,
   visitorTypingPreview
 }: {
+  onRequestSummary: (conversationId: string) => Promise<ConversationSummary | null>;
+  onRequestAutoTag: (conversationId: string) => Promise<void>;
   cannedResponses: CannedResponse[];
   chatLink: string;
   composer: string;
   connection: "connecting" | "online" | "offline";
   conversations: Conversation[];
+  myMembershipId: string | null;
   isCreating: boolean;
   isMessagesLoading: boolean;
   isSending: boolean;
@@ -4027,6 +5213,7 @@ function ChatsScreen({
   onSendMessage: (event: FormEvent<HTMLFormElement>) => void;
   onSendNote: () => void;
   onSendProduct: () => void;
+  onSendCarousel: () => void;
   onTyping: (value: string) => void;
   onUpdateStatus: (status: ConversationStatus) => void;
   onUpdateTags: (tags: string[]) => void;
@@ -4045,6 +5232,35 @@ function ChatsScreen({
         : { color: "bg-amber-400", label: "Connecting" };
   const conversationTags = readConversationTags(selectedConversation);
   const intakeAnalysis = readIntakeAnalysis(selectedConversation);
+  const { ask, dialog } = useAskDialog();
+  const [summary, setSummary] = useState<ConversationSummary | null>(null);
+  const [isSummarising, setIsSummarising] = useState(false);
+
+  // A summary belongs to one chat; drop it when the agent opens another.
+  useEffect(() => {
+    setSummary(null);
+  }, [selectedConversation?.id]);
+
+  async function onSummarise() {
+    if (!selectedConversation) {
+      return;
+    }
+    setIsSummarising(true);
+    try {
+      setSummary(await onRequestSummary(selectedConversation.id));
+    } finally {
+      setIsSummarising(false);
+    }
+  }
+
+  function onAutoTag() {
+    if (selectedConversation) {
+      void onRequestAutoTag(selectedConversation.id);
+    }
+  }
+
+  const onClearSummary = () => setSummary(null);
+
   return (
     <div className="grid min-h-full grid-cols-1 bg-[#1f1f23] text-white md:h-full md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden 2xl:grid-cols-[320px_minmax(0,1fr)_340px]">
       <aside className="flex flex-col border-b border-[#111214] bg-[#202024] md:h-full md:min-h-0 md:border-b-0 md:border-r">
@@ -4133,6 +5349,26 @@ function ChatsScreen({
       <section className="flex min-h-[420px] flex-col border-b border-[#111214] md:h-full md:min-h-0 md:border-b-0 2xl:border-r">
         {selectedConversation ? (
           <>
+            {selectedConversation.assignedAgentId &&
+            myMembershipId &&
+            selectedConversation.assignedAgentId !== myMembershipId ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-violet-600 px-5 py-1.5 text-xs font-semibold text-white">
+                <span>
+                  👁 Supervising{" "}
+                  {agentLabel(members.find((member) => member.id === selectedConversation.assignedAgentId))}
+                  &apos;s chat — anything you send goes to the visitor. Use Note for private comments.
+                </span>
+                <button
+                  className="rounded-md bg-white px-2.5 py-1 text-[11px] font-bold text-violet-700 hover:bg-white/90"
+                  disabled={isUpdatingConversation}
+                  onClick={() => onAssign(myMembershipId)}
+                  type="button"
+                >
+                  Take over
+                </button>
+              </div>
+            ) : null}
+
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#303036] px-5 py-2">
               <div className="min-w-0">
                 <p className="truncate text-lg font-bold">{selectedConversation.subject ?? "Unnamed customer"}</p>
@@ -4217,19 +5453,23 @@ function ChatsScreen({
               <button
                 className="rounded-full border border-dashed border-white/25 px-2 py-0.5 text-xs text-white/60 hover:bg-white/10"
                 onClick={() => {
-                  const tag = window.prompt("Add a tag (e.g. sales, bug, vip):");
+                  void ask({
+                    title: "Add a tag to this chat",
+                    placeholder: "e.g. sales, bug, vip",
+                    confirmLabel: "Add tag"
+                  }).then((tag) => {
+                    if (!tag) {
+                      return;
+                    }
 
-                  if (!tag || !tag.trim()) {
-                    return;
-                  }
+                    const normalized = tag.toLowerCase();
 
-                  const normalized = tag.trim().toLowerCase();
+                    if (conversationTags.includes(normalized)) {
+                      return;
+                    }
 
-                  if (conversationTags.includes(normalized)) {
-                    return;
-                  }
-
-                  onUpdateTags([...conversationTags, normalized]);
+                    onUpdateTags([...conversationTags, normalized]);
+                  });
                 }}
                 type="button"
               >
@@ -4264,6 +5504,37 @@ function ChatsScreen({
                 </span>
               </div>
             ) : null}
+
+              {summary ? (
+                <div className="mx-4 mt-3 rounded-lg border border-sky-400/30 bg-sky-500/10 p-3 text-xs text-sky-100">
+                  <p className="flex items-center justify-between font-bold">
+                    Chat summary
+                    <button
+                      className="text-sky-300 hover:text-white"
+                      onClick={onClearSummary}
+                      type="button"
+                    >
+                      ✕
+                    </button>
+                  </p>
+                  <p className="mt-1 text-sky-50">{summary.summary}</p>
+                  {summary.bullets.length ? (
+                    <ul className="mt-2 list-disc pl-4 text-sky-100/80">
+                      {summary.bullets.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {summary.suggestedNextStep ? (
+                    <p className="mt-2 text-sky-200">Next: {summary.suggestedNextStep}</p>
+                  ) : null}
+                  {!summary.usedAI ? (
+                    <p className="mt-2 text-[10px] text-sky-200/70">
+                      Written from the transcript. Add an AI key in Settings for a sharper summary.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
             <form className="shrink-0 border-t border-[#303036] p-4" onSubmit={onSendMessage}>
               <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-slate-900 shadow-lg">
@@ -4323,12 +5594,38 @@ function ChatsScreen({
                   🛍 Product
                 </button>
                 <button
+                  className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800 hover:bg-indigo-200 disabled:opacity-60"
+                  disabled={isSending}
+                  onClick={onSendCarousel}
+                  title="Send a row of cards the visitor can swipe through"
+                  type="button"
+                >
+                  🖼 Carousel
+                </button>
+                <button
                   className="rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200 hover:bg-violet-500/25 disabled:opacity-60"
                   disabled={isSuggestingAi}
                   onClick={onAiSuggest}
                   type="button"
                 >
                   {isSuggestingAi ? "✨ Thinking…" : "✨ AI suggest"}
+                </button>
+                <button
+                  className="rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-1 text-xs font-bold text-sky-200 hover:bg-sky-500/25 disabled:opacity-60"
+                  disabled={isSummarising}
+                  onClick={onSummarise}
+                  title="A short summary of this chat so far"
+                  type="button"
+                >
+                  {isSummarising ? "📋 Reading…" : "📋 Summarise"}
+                </button>
+                <button
+                  className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25"
+                  onClick={onAutoTag}
+                  title="Work out this chat's topics and tag it"
+                  type="button"
+                >
+                  🏷 Auto-tag
                 </button>
                 {cannedResponses.slice(0, 6).map((response) => (
                   <button
@@ -4351,16 +5648,20 @@ function ChatsScreen({
                       return;
                     }
 
-                    const shortcut = window.prompt("Shortcut for this canned reply (e.g. /thanks):");
+                    void ask({
+                      title: "Save this reply for later",
+                      placeholder: "Shortcut, e.g. /thanks",
+                      confirmLabel: "Save reply"
+                    }).then((shortcut) => {
+                      if (!shortcut) {
+                        return null;
+                      }
 
-                    if (!shortcut || !shortcut.trim()) {
-                      return;
-                    }
-
-                    void onSaveCannedResponse({
-                      title: shortcut.replace(/^\//, "").trim(),
-                      shortcut: shortcut.trim(),
-                      body
+                      return onSaveCannedResponse({
+                        title: shortcut.replace(/^\//, "").trim(),
+                        shortcut,
+                        body
+                      });
                     }).then((ok) => {
                       if (ok) {
                         setComposer("");
@@ -4446,13 +5747,19 @@ function ChatsScreen({
                     onAction("No canned responses yet — add them in Automate → Canned responses.");
                     return;
                   }
-                  const list = cannedResponses.map((c, i) => `${i + 1}. ${c.shortcut} — ${c.title}`).join("\n");
-                  const pick = window.prompt("Insert which canned response? Enter the number:\n" + list);
-                  const idx = pick ? parseInt(pick, 10) - 1 : -1;
-                  const chosen = cannedResponses[idx];
-                  if (chosen) {
-                    setComposer(composer ? composer + " " + chosen.body : chosen.body);
-                  }
+                  void ask({
+                    title: "Insert a canned response",
+                    choices: cannedResponses.map((canned) => ({
+                      value: canned.id,
+                      label: canned.shortcut,
+                      hint: canned.title
+                    }))
+                  }).then((pickedId) => {
+                    const chosen = cannedResponses.find((canned) => canned.id === pickedId);
+                    if (chosen) {
+                      setComposer(composer ? composer + " " + chosen.body : chosen.body);
+                    }
+                  });
                 }}
                 type="button"
               >
@@ -4470,13 +5777,18 @@ function ChatsScreen({
                     onAction("No other agents to transfer to.");
                     return;
                   }
-                  const list = members.map((m, i) => `${i + 1}. ${m.name || m.email}`).join("\n");
-                  const pick = window.prompt("Transfer this chat to which agent? Enter the number:\n" + list);
-                  const idx = pick ? parseInt(pick, 10) - 1 : -1;
-                  const agent = members[idx];
-                  if (agent) {
-                    onAssign(agent.id);
-                  }
+                  void ask({
+                    title: "Transfer this chat to",
+                    choices: members.map((member) => ({
+                      value: member.id,
+                      label: member.name || member.email,
+                      ...(member.name ? { hint: member.email } : {})
+                    }))
+                  }).then((membershipId) => {
+                    if (membershipId) {
+                      onAssign(membershipId);
+                    }
+                  });
                 }}
                 type="button"
               >
@@ -4507,6 +5819,7 @@ function ChatsScreen({
           </div>
         </div>
       </aside>
+      {dialog}
     </div>
   );
 }
@@ -5147,14 +6460,15 @@ function GoalsScreen({
   const [target, setTarget] = useState("");
   const [value, setValue] = useState("");
 
-  const chats = report?.totalConversations ?? 0;
-  const visitors = Math.max(totalVisitors, report ? report.totalConversations * 4 : 0);
+  const chats = report?.engagement.chats ?? 0;
+  // Real tracked visitors from the last 7 days (falls back to the live list).
+  const visitors = report?.engagement.visitors ?? totalVisitors;
   const goalCompletions = goals.reduce((sum, goal) => sum + goal.completedCount, 0);
 
   const cards = [
-    { label: "Visitors", value: visitors, delta: "-28", deltaTone: "text-rose-400", icon: UsersRound },
-    { label: "Chats", value: chats, delta: "+3", deltaTone: "text-emerald-400", icon: MessagesSquare },
-    { label: "Goals", value: goalCompletions, delta: null, deltaTone: "", icon: Sparkles }
+    { label: "Visitors (7 days)", value: visitors, delta: null, deltaTone: "", icon: UsersRound },
+    { label: "Chats (7 days)", value: chats, delta: null, deltaTone: "", icon: MessagesSquare },
+    { label: "Goals completed", value: goalCompletions, delta: null, deltaTone: "", icon: Sparkles }
   ];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -7258,11 +8572,256 @@ function ReportBreakdownTable({
   );
 }
 
+const REPORT_EXPORT_TYPES: Array<{ type: "chats" | "agents" | "tags"; label: string; hint: string }> = [
+  { type: "chats", label: "Every chat", hint: "One row per chat: status, source, messages, tags" },
+  { type: "agents", label: "Agent performance", hint: "Chats assigned, resolved and messages sent" },
+  { type: "tags", label: "Tag usage", hint: "How often each topic came up" }
+];
+
+/**
+ * The full exports: rows straight from the server (not just the summary tiles), and the
+ * same file emailed every day or week to people who never open the dashboard.
+ */
+function ReportExportPanel({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
+  const [reportType, setReportType] = useState<"chats" | "agents" | "tags">("chats");
+  const [frequency, setFrequency] = useState<"daily" | "weekly">("weekly");
+  const [recipients, setRecipients] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    listReportSchedules(organizationId, accessToken)
+      .then((result) => {
+        if (!cancelled) setSchedules(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  async function download(type: "chats" | "agents" | "tags") {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const csv = await downloadReportCsv(organizationId, type, accessToken);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `livechat-${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      onAction(`${type} export downloaded.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not build that export");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addSchedule(event: FormEvent) {
+    event.preventDefault();
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await createReportSchedule(organizationId, accessToken, {
+        reportType,
+        frequency,
+        recipients: recipients.split(/[,\s]+/).filter(Boolean)
+      });
+      setSchedules((current) => [...current, created]);
+      setRecipients("");
+      onAction(`${frequency} ${reportType} report scheduled.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not schedule that report");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendNow(schedule: ReportSchedule) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await runReportSchedule(organizationId, schedule.id, accessToken);
+      onAction(
+        result.sent
+          ? `Report sent to ${result.recipients.join(", ")}.`
+          : "Email is not configured yet, so nothing was sent."
+      );
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not send the report");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(schedule: ReportSchedule) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    try {
+      await deleteReportSchedule(organizationId, schedule.id, accessToken);
+      setSchedules((current) => current.filter((item) => item.id !== schedule.id));
+      onAction("Scheduled report removed.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not remove that schedule");
+    }
+  }
+
+  return (
+    <div className="mt-6 grid gap-4">
+      <div className="rounded-xl border border-slate-200 p-6">
+        <p className="text-sm font-bold">Full exports</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Every row from the server, not just the tiles above.
+        </p>
+        <div className="mt-4 grid gap-2">
+          {REPORT_EXPORT_TYPES.map((item) => (
+            <button
+              className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-2.5 text-left hover:border-[#0067ff] hover:bg-[#eef3ff] disabled:opacity-50"
+              disabled={busy}
+              key={item.type}
+              onClick={() => void download(item.type)}
+              type="button"
+            >
+              <span>
+                <span className="block text-sm font-bold">{item.label}</span>
+                <span className="block text-xs text-slate-500">{item.hint}</span>
+              </span>
+              <Download className="h-4 w-4 text-[#0067ff]" aria-hidden />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 p-6">
+        <p className="text-sm font-bold">Email this report on a schedule</p>
+        <p className="mt-1 text-xs text-slate-500">
+          The same file, sent automatically — useful for owners who never open the dashboard.
+        </p>
+
+        {error ? (
+          <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            {error}
+          </p>
+        ) : null}
+
+        <form className="mt-4 grid gap-2 md:grid-cols-[1fr_1fr_2fr_auto]" onSubmit={(event) => void addSchedule(event)}>
+          <select
+            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+            onChange={(event) => setReportType(event.target.value as "chats" | "agents" | "tags")}
+            value={reportType}
+          >
+            {REPORT_EXPORT_TYPES.map((item) => (
+              <option key={item.type} value={item.type}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+            onChange={(event) => setFrequency(event.target.value as "daily" | "weekly")}
+            value={frequency}
+          >
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+          </select>
+          <input
+            className="h-9 rounded-md border border-slate-300 px-3 text-sm"
+            onChange={(event) => setRecipients(event.target.value)}
+            placeholder="owner@acme.com, boss@acme.com"
+            value={recipients}
+          />
+          <button
+            className="h-9 rounded-md bg-[#0067ff] px-4 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+            disabled={busy || !recipients.trim()}
+            type="submit"
+          >
+            Schedule
+          </button>
+        </form>
+
+        {schedules.length ? (
+          <div className="mt-4 grid gap-2">
+            {schedules.map((schedule) => (
+              <div
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-4 py-2.5"
+                key={schedule.id}
+              >
+                <span className="text-xs">
+                  <span className="font-bold">
+                    {schedule.frequency === "daily" ? "Every day" : "Every week"} · {schedule.reportType}
+                  </span>
+                  <span className="block text-slate-500">
+                    to {schedule.recipients.join(", ")}
+                    {schedule.lastRunAt
+                      ? ` · last sent ${new Date(schedule.lastRunAt).toLocaleDateString()}`
+                      : " · not sent yet"}
+                  </span>
+                </span>
+                <span className="flex gap-2">
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-1 text-xs font-bold hover:bg-slate-50 disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => void sendNow(schedule)}
+                    type="button"
+                  >
+                    Send now
+                  </button>
+                  <button
+                    className="rounded-md px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                    onClick={() => void remove(schedule)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-slate-400">No scheduled reports yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReportsScreen({
+  accessToken,
+  organizationId,
+  onAction,
   members,
   report,
   view
 }: {
+  accessToken: string | null;
+  organizationId: string | null;
+  onAction: (message: string) => void;
   members: OrganizationMember[];
   report: ReportSummary | null;
   view: string;
@@ -7429,6 +8988,12 @@ function ReportsScreen({
               <Download className="h-4 w-4" aria-hidden /> Download CSV
             </button>
           </div>
+
+          <ReportExportPanel
+            accessToken={accessToken}
+            onAction={onAction}
+            organizationId={organizationId}
+          />
         </div>
       </div>
     );
@@ -7509,120 +9074,114 @@ function ReportsScreen({
   let body: React.ReactNode = null;
 
   if (view === "Chat engagement") {
-    const campaignsArr = counts.map((count) => Math.round(count * 0.058));
-    const customerArr = counts.map((count, index) => (index === 1 && count > 0 ? 1 : 0));
-    const agentArr = counts.map((count, index) => Math.max(count - (campaignsArr[index] ?? 0) - (customerArr[index] ?? 0), 0));
+    const { engagement } = report;
+    const answered = Math.max(engagement.chats - engagement.missedChats, 0);
     const max = Math.max(...counts, 1);
-    const sum = (arr: number[]) => arr.reduce((acc, value) => acc + value, 0);
     title = "Chat engagement";
-    total = totalChats;
+    total = engagement.chats;
     body = (
       <>
         <ReportLegend
           items={[
-            { color: "#2f6bff", label: "From campaigns", value: String(sum(campaignsArr)) },
-            { color: "#f5c518", label: "Started by customer", value: String(sum(customerArr)) },
-            { color: "#e6377e", label: "Started by agent", value: String(sum(agentArr)) }
+            { color: "#2f6bff", label: "Visitors tracked", value: String(engagement.visitors) },
+            { color: "#f5c518", label: "Chats started", value: String(engagement.chats) },
+            { color: "#e6377e", label: "Answered by an agent", value: String(answered) }
           ]}
         />
+        <p className="px-7 text-xs text-slate-500">
+          {engagement.engagementRate}% of tracked visitors started a chat · {engagement.averageMessagesPerChat} messages
+          per chat on average.
+        </p>
         <ReportBarChart
           max={max}
           series={labels.map((label, index) => ({
             label,
-            segments: [
-              { value: campaignsArr[index] ?? 0, color: "#2f6bff" },
-              { value: customerArr[index] ?? 0, color: "#f5c518" },
-              { value: agentArr[index] ?? 0, color: "#e6377e" }
-            ]
+            segments: [{ value: counts[index] ?? 0, color: "#2f6bff" }]
           }))}
         />
-        <ReportBreakdownTable
-          columns={cols}
-          rows={[
-            { label: "From campaigns", values: campaignsArr },
-            { label: "Started by customer", values: customerArr },
-            { label: "Started by agent", values: agentArr }
-          ]}
-        />
+        <ReportBreakdownTable columns={cols} rows={[{ label: "Chats started", values: counts }]} />
       </>
     );
   } else if (view === "Missed chats") {
+    const { engagement } = report;
     title = "Missed chats";
-    total = 0;
+    total = engagement.missedChats;
     body = (
       <>
-        <ReportBarChart max={1} series={labels.map((label) => ({ label, segments: [{ value: 0, color: "#2f6bff" }] }))} />
-        <ReportBreakdownTable columns={cols} rows={[{ label: "Missed chats", values: counts.map(() => 0) }]} />
+        <ReportLegend
+          items={[
+            { color: "#e6377e", label: "Never answered by an agent", value: String(engagement.missedChats) },
+            {
+              color: "#2f6bff",
+              label: "Answered",
+              value: String(Math.max(engagement.chats - engagement.missedChats, 0))
+            }
+          ]}
+        />
+        <p className="px-7 text-xs text-slate-500">
+          Counted over the last 7 days: chats where no agent ever sent a message.
+        </p>
+        <ReportBarChart
+          max={Math.max(...counts, 1)}
+          series={labels.map((label, index) => ({
+            label,
+            segments: [{ value: counts[index] ?? 0, color: "#2f6bff" }]
+          }))}
+        />
       </>
     );
   } else if (view === "Campaigns conversion") {
-    const displayed = counts.map((count) => count * 2 + 20);
-    const fromCampaigns = counts.map((count) => Math.round(count * 0.058));
-    const max = Math.max(...displayed, 1);
+    const { campaigns } = report;
     title = "Campaigns conversion";
-    total = displayed.reduce((sum, value) => sum + value, 0);
+    total = campaigns.goalsCompleted;
     body = (
       <>
         <ReportLegend
           items={[
-            { color: "#2f6bff", label: "Campaigns displayed", value: String(displayed.reduce((s, v) => s + v, 0)) },
-            { color: "#f5c518", label: "Chats from campaigns", value: String(fromCampaigns.reduce((s, v) => s + v, 0)) }
+            { color: "#2f6bff", label: "Campaigns created", value: String(campaigns.total) },
+            { color: "#f5c518", label: "Active", value: String(campaigns.active) },
+            { color: "#e6377e", label: "Goals completed", value: String(campaigns.goalsCompleted) }
           ]}
         />
-        <ReportLineChart
-          labels={labels}
-          lines={[
-            { color: "#2f6bff", points: displayed },
-            { color: "#f5c518", points: fromCampaigns }
-          ]}
-          max={max}
-        />
-        <div className="mt-2 flex justify-around px-7 text-[10px] text-slate-500">
-          {labels.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-        <ReportBreakdownTable
-          columns={cols}
-          rows={[
-            { label: "Campaigns displayed", values: displayed },
-            { label: "Chats from campaigns", values: fromCampaigns }
-          ]}
-        />
+        {!campaigns.delivering ? (
+          <p className="mx-7 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Campaigns are saved but are not shown to visitors yet, so there is nothing to convert. Conversion
+            numbers stay at zero until campaign delivery is switched on.
+          </p>
+        ) : null}
       </>
     );
   } else if (view === "Tags usage") {
-    const notTagged = counts;
-    const max = Math.max(...counts, 1);
+    const usage = report.tagUsage;
+    const taggedChats = usage.reduce((sum, item) => sum + item.count, 0);
+    const share = totalChats > 0 ? Math.round((taggedChats / totalChats) * 100) : 0;
     title = "Tags usage";
-    total = `0 (0%)`;
+    total = `${taggedChats} (${share}%)`;
     body = (
       <>
         <ReportLegend
           items={[
-            { color: "#2f6bff", label: "Tagged chats", value: "0 (0%)" },
-            { color: "#f5c518", label: "Not tagged chats", value: `${totalChats} (100%)` }
+            { color: "#2f6bff", label: "Tagged chats", value: `${taggedChats} (${share}%)` },
+            {
+              color: "#f5c518",
+              label: "Not tagged",
+              value: `${Math.max(totalChats - taggedChats, 0)} (${Math.max(100 - share, 0)}%)`
+            }
           ]}
         />
-        <ReportLineChart
-          labels={labels}
-          lines={[
-            { color: "#2f6bff", points: counts.map(() => 0) },
-            { color: "#f5c518", points: notTagged }
-          ]}
-          max={max}
-        />
-        <div className="mt-2 flex justify-around px-7 text-[10px] text-slate-500">
-          {labels.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-        <ReportBreakdownTable
-          columns={["No. of chats", "% of tagged"]}
-          rows={["sales", "positive feedback", "complaint", "support", "spam", "chatbot transfer", "chatbot"].map(
-            (tag) => ({ label: tag, values: [0, "-"] })
-          )}
-        />
+        {usage.length === 0 ? (
+          <p className="px-7 py-6 text-center text-sm text-slate-500">
+            No tags used in the last 30 days. Tag a chat from the chat header to see it here.
+          </p>
+        ) : (
+          <ReportBreakdownTable
+            columns={["No. of chats", "% of tagged"]}
+            rows={usage.map((item) => ({
+              label: item.tag,
+              values: [item.count, taggedChats > 0 ? `${Math.round((item.count / taggedChats) * 100)}%` : "-"]
+            }))}
+          />
+        )}
       </>
     );
   } else if (view === "Summary") {
@@ -7739,29 +9298,28 @@ function ReportsScreen({
       </>
     );
   } else if (view === "Customers") {
-    const max = Math.max(...counts, 1);
-    const returning = counts.map((count) => Math.round(count * 0.3));
+    const { customers } = report;
     title = "Customers";
-    total = totalChats;
+    total = customers.total;
     body = (
       <>
         <ReportLegend
           items={[
-            { color: "#2f6bff", label: "New customers", value: String(totalChats - returning.reduce((s, v) => s + v, 0)) },
-            { color: "#f5c518", label: "Returning", value: String(returning.reduce((s, v) => s + v, 0)) }
+            { color: "#2f6bff", label: "Customer records", value: String(customers.total) },
+            { color: "#f5c518", label: "Returning (more than one chat)", value: String(customers.returning) },
+            { color: "#e6377e", label: "New in the last 7 days", value: String(customers.newLast7Days) }
           ]}
         />
+        <p className="px-7 text-xs text-slate-500">
+          Customer records are created when a visitor shares their email, and in Engage → Customers.
+        </p>
         <ReportBarChart
-          max={max}
+          max={Math.max(...counts, 1)}
           series={labels.map((label, index) => ({
             label,
-            segments: [
-              { value: (counts[index] ?? 0) - (returning[index] ?? 0), color: "#2f6bff" },
-              { value: returning[index] ?? 0, color: "#f5c518" }
-            ]
+            segments: [{ value: counts[index] ?? 0, color: "#2f6bff" }]
           }))}
         />
-        <ReportBreakdownTable columns={cols} rows={[{ label: "Customers", values: counts }]} />
       </>
     );
   } else {
@@ -8048,39 +9606,623 @@ function IntegrationsScreen({
   );
 }
 
-function AppsScreen({ onAction }: { onAction: (message: string) => void }) {
-  const [installed, setInstalled] = useState<string[]>([]);
-  const [showInstalledOnly, setShowInstalledOnly] = useState(false);
+const CHANNEL_SETUP: Array<{
+  channel: MessagingChannelKey;
+  name: string;
+  idLabel: string;
+  idHint: string;
+  tone: string;
+  letter: string;
+  /** Meta channels need a token; email sends through the workspace's own SMTP. */
+  needsAccessToken?: boolean;
+  secretLabel?: string;
+  secretHint?: string;
+  setupNote?: string;
+}> = [
+  {
+    channel: "WHATSAPP",
+    name: "WhatsApp",
+    idLabel: "Phone number ID",
+    idHint: "Meta Business → WhatsApp → API setup",
+    tone: "from-green-400 to-emerald-600",
+    letter: "W",
+    needsAccessToken: true
+  },
+  {
+    channel: "MESSENGER",
+    name: "Facebook Messenger",
+    idLabel: "Facebook Page ID",
+    idHint: "Page → About → Page transparency",
+    tone: "from-blue-500 to-violet-500",
+    letter: "M",
+    needsAccessToken: true
+  },
+  {
+    channel: "INSTAGRAM",
+    name: "Instagram",
+    idLabel: "Instagram account ID",
+    idHint: "The professional account linked to your Page",
+    tone: "from-pink-500 to-orange-400",
+    letter: "I",
+    needsAccessToken: true
+  },
+  {
+    channel: "EMAIL",
+    name: "Email",
+    idLabel: "Support email address",
+    idHint: "support@yourcompany.com",
+    tone: "from-amber-400 to-orange-500",
+    letter: "@",
+    secretLabel: "Webhook signing secret",
+    secretHint: "Any secret — paste the same one into your mail provider",
+    setupNote:
+      "Customers email this address and it lands in your inbox; your replies go back out over SMTP on the same thread."
+  },
+  {
+    channel: "APPLE",
+    name: "Apple Messages for Business",
+    idLabel: "Business ID",
+    idHint: "Needs an approved Apple business account",
+    tone: "from-slate-500 to-slate-800",
+    letter: "A",
+    needsAccessToken: true
+  }
+];
+
+function MessagingChannelsPanel({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [channels, setChannels] = useState<ChannelConnection[]>([]);
+  const [openChannel, setOpenChannel] = useState<MessagingChannelKey | null>(null);
+  const [form, setForm] = useState({ externalId: "", accessToken: "", appSecret: "", displayName: "" });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("lc_installed_apps");
-      if (saved) {
-        setInstalled(JSON.parse(saved) as string[]);
-      }
-    } catch {
-      // ignore
+    if (!accessToken || !organizationId) {
+      return;
     }
-  }, []);
+    let cancelled = false;
+    setIsLoading(true);
+    listChannels(organizationId, accessToken)
+      .then((result) => {
+        if (!cancelled) setChannels(result);
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load the channels");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
 
-  function toggleInstall(name: string) {
-    setInstalled((current) => {
-      const next = current.includes(name)
-        ? current.filter((item) => item !== name)
-        : [...current, name];
-      try {
-        window.localStorage.setItem("lc_installed_apps", JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      onAction(current.includes(name) ? `${name} uninstalled.` : `${name} installed.`);
-      return next;
-    });
+  function openForm(channel: MessagingChannelKey) {
+    setError("");
+    setForm({ externalId: "", accessToken: "", appSecret: "", displayName: "" });
+    setOpenChannel((current) => (current === channel ? null : channel));
   }
 
-  const visibleApps = showInstalledOnly
-    ? appCards.filter((card) => installed.includes(card.name))
-    : appCards;
+  async function connect(channel: MessagingChannelKey) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const saved = await connectChannel(organizationId, channel, accessToken, {
+        externalId: form.externalId.trim(),
+        ...(form.accessToken.trim() ? { accessToken: form.accessToken.trim() } : {}),
+        ...(form.appSecret.trim() ? { appSecret: form.appSecret.trim() } : {}),
+        ...(form.displayName.trim() ? { displayName: form.displayName.trim() } : {})
+      });
+      setChannels((current) =>
+        current.map((item) => (item.channel === channel ? saved : item))
+      );
+      setOpenChannel(null);
+      onAction(`${saved.displayName ?? "Channel"} connected. Paste the webhook URL into Meta to finish.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not connect this channel");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function disconnect(channel: MessagingChannelKey) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await disconnectChannel(organizationId, channel, accessToken);
+      setChannels((current) =>
+        current.map((item) =>
+          item.channel === channel
+            ? { ...item, connected: false, isActive: false, externalId: "", verifyToken: null }
+            : item
+        )
+      );
+      onAction("Channel disconnected.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not disconnect this channel");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (isLoading) {
+    return <p className="text-sm text-slate-500">Loading channels…</p>;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {error ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+      ) : null}
+
+      {CHANNEL_SETUP.map((setup) => {
+        const state = channels.find((item) => item.channel === setup.channel);
+        const isOpen = openChannel === setup.channel;
+
+        return (
+          <div className="rounded-lg border border-slate-200 p-4" key={setup.channel}>
+            <div className="flex flex-wrap items-center gap-3">
+              <span
+                className={cn(
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br text-sm font-black text-white",
+                  setup.tone
+                )}
+              >
+                {setup.letter}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-slate-800">{setup.name}</span>
+                <span className="block text-xs text-slate-500">
+                  {state?.connected
+                    ? `Connected${state.displayName ? ` — ${state.displayName}` : ""}`
+                    : "Not connected"}
+                </span>
+              </span>
+              {state?.connected ? (
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                  disabled={isSaving}
+                  onClick={() => void disconnect(setup.channel)}
+                  type="button"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="rounded-md bg-[#0067ff] px-3 py-2 text-xs font-bold text-white hover:bg-[#0050c7]"
+                  onClick={() => openForm(setup.channel)}
+                  type="button"
+                >
+                  {isOpen ? "Cancel" : "Connect"}
+                </button>
+              )}
+            </div>
+
+            {state?.connected ? (
+              <div className="mt-3 grid gap-2 rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+                <p>
+                  <b>Webhook URL</b>
+                  <br />
+                  <code className="break-all">{state.webhookUrl}</code>
+                </p>
+                {state.verifyToken ? (
+                  <p>
+                    <b>Verify token</b>
+                    <br />
+                    <code className="break-all">{state.verifyToken}</code>
+                  </p>
+                ) : null}
+                <p className="text-slate-500">
+                  {setup.channel === "EMAIL"
+                    ? "Point your mail provider's inbound route at this URL (SendGrid Inbound Parse, Mailgun routes or Postmark), signing each post with the secret above."
+                    : "Paste both into Meta → your app → Webhooks, then subscribe to the messages field."}
+                </p>
+              </div>
+            ) : null}
+
+            {isOpen && !state?.connected ? (
+              <form
+                className="mt-3 grid gap-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void connect(setup.channel);
+                }}
+              >
+                {setup.setupNote ? (
+                  <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">{setup.setupNote}</p>
+                ) : null}
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  {setup.idLabel}
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                    onChange={(event) => setForm((current) => ({ ...current, externalId: event.target.value }))}
+                    placeholder={setup.idHint}
+                    required
+                    value={form.externalId}
+                  />
+                </label>
+                {setup.needsAccessToken ? (
+                  <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                    Access token
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                      onChange={(event) => setForm((current) => ({ ...current, accessToken: event.target.value }))}
+                      placeholder="Permanent token from Meta"
+                      required
+                      type="password"
+                      value={form.accessToken}
+                    />
+                  </label>
+                ) : null}
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  {setup.secretLabel ?? "App secret (verifies incoming webhooks)"}
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                    onChange={(event) => setForm((current) => ({ ...current, appSecret: event.target.value }))}
+                    placeholder={setup.secretHint ?? "Meta app → Settings → Basic"}
+                    type="password"
+                    value={form.appSecret}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  Display name
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                    onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+                    placeholder="Support WhatsApp"
+                    value={form.displayName}
+                  />
+                </label>
+                <button
+                  className="justify-self-start rounded-md bg-[#0067ff] px-4 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-60"
+                  disabled={isSaving}
+                  type="submit"
+                >
+                  {isSaving ? "Connecting…" : "Save connection"}
+                </button>
+              </form>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SsoPanel({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [connection, setConnection] = useState<SsoConnection | null>(null);
+  const [form, setForm] = useState<SaveSsoInput>({
+    provider: "GOOGLE",
+    emailDomain: "",
+    clientId: "",
+    clientSecret: "",
+    issuer: ""
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    getSsoConnection(organizationId, accessToken)
+      .then((result) => {
+        if (cancelled) return;
+        setConnection(result);
+        if (result) {
+          setForm({
+            provider: result.provider,
+            emailDomain: result.emailDomain,
+            clientId: result.clientId,
+            clientSecret: "",
+            issuer: result.issuer ?? ""
+          });
+        }
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load the SSO setup");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  async function save() {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const saved = await saveSsoConnection(organizationId, accessToken, {
+        provider: form.provider,
+        emailDomain: form.emailDomain.trim(),
+        clientId: form.clientId.trim(),
+        clientSecret: form.clientSecret,
+        ...(form.provider === "OIDC" && form.issuer ? { issuer: form.issuer.trim() } : {})
+      });
+      setConnection(saved);
+      setForm((current) => ({ ...current, clientSecret: "" }));
+      onAction("Single sign-on saved.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save the SSO setup");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await removeSsoConnection(organizationId, accessToken);
+      setConnection(null);
+      onAction("Single sign-on switched off.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not switch off SSO");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (isLoading) {
+    return <p className="text-sm text-slate-500">Loading…</p>;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {error ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+      ) : null}
+
+      {connection ? (
+        <div className="grid gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          <p>
+            <b>{connection.emailDomain}</b> signs in with {connection.provider === "OIDC" ? "your OIDC provider" : connection.provider === "GOOGLE" ? "Google Workspace" : "Microsoft Entra"}.
+          </p>
+          <p className="text-xs">
+            Redirect URI to paste into the identity provider:
+            <br />
+            <code className="break-all">{connection.redirectUri}</code>
+          </p>
+        </div>
+      ) : null}
+
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Identity provider
+          <select
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+            onChange={(event) =>
+              setForm((current) => ({ ...current, provider: event.target.value as SsoConnection["provider"] }))
+            }
+            value={form.provider}
+          >
+            <option value="GOOGLE">Google Workspace</option>
+            <option value="MICROSOFT">Microsoft Entra ID</option>
+            <option value="OIDC">Other (OpenID Connect)</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Company email domain
+          <input
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+            onChange={(event) => setForm((current) => ({ ...current, emailDomain: event.target.value }))}
+            placeholder="acme.com"
+            required
+            value={form.emailDomain}
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Client ID
+          <input
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+            onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
+            required
+            value={form.clientId}
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Client secret
+          <input
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+            onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
+            placeholder={connection ? "Leave as is to replace it" : ""}
+            required
+            type="password"
+            value={form.clientSecret}
+          />
+        </label>
+        {form.provider === "OIDC" ? (
+          <label className="grid gap-1 text-xs font-semibold text-slate-600">
+            Issuer URL
+            <input
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+              onChange={(event) => setForm((current) => ({ ...current, issuer: event.target.value }))}
+              placeholder="https://id.acme.com"
+              required
+              value={form.issuer ?? ""}
+            />
+          </label>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded-md bg-[#0067ff] px-4 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-60"
+            disabled={isSaving}
+            type="submit"
+          >
+            {isSaving ? "Saving…" : connection ? "Update single sign-on" : "Turn on single sign-on"}
+          </button>
+          {connection ? (
+            <button
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              disabled={isSaving}
+              onClick={() => void remove()}
+              type="button"
+            >
+              Switch off
+            </button>
+          ) : null}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** Apps that need keys before they can do anything. */
+const APP_SETTINGS_FIELDS: Record<string, Array<{ key: string; label: string; placeholder: string; secret?: boolean }>> = {
+  slack: [{ key: "webhookUrl", label: "Slack incoming webhook URL", placeholder: "https://hooks.slack.com/services/…" }],
+  shopify: [
+    { key: "shopDomain", label: "Shop domain", placeholder: "acme.myshopify.com" },
+    { key: "accessToken", label: "Admin API access token", placeholder: "shpat_…", secret: true }
+  ],
+  hubspot: [{ key: "accessToken", label: "Private app token", placeholder: "pat-…", secret: true }]
+};
+
+function AppsScreen({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [apps, setApps] = useState<MarketplaceApp[]>([]);
+  const [showInstalledOnly, setShowInstalledOnly] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [openSettingsKey, setOpenSettingsKey] = useState<string | null>(null);
+  const [draftSettings, setDraftSettings] = useState<Record<string, string>>({});
+
+  function openSettings(app: MarketplaceApp) {
+    const fields = APP_SETTINGS_FIELDS[app.key] ?? [];
+    setDraftSettings(
+      Object.fromEntries(
+        fields.map((field) => [field.key, String(app.settings?.[field.key] ?? "")])
+      )
+    );
+    setOpenSettingsKey((current) => (current === app.key ? null : app.key));
+  }
+
+  async function saveSettings(app: MarketplaceApp) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setPendingKey(app.key);
+    setError("");
+    try {
+      setApps(await installApp(organizationId, app.key, accessToken, draftSettings));
+      setOpenSettingsKey(null);
+      onAction(`${app.name} keys saved.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save these keys");
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  async function runTest(app: MarketplaceApp) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setPendingKey(app.key);
+    setError("");
+    try {
+      const result = await testApp(organizationId, app.key, accessToken);
+      onAction(result.message);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "The test call failed");
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    listApps(organizationId, accessToken)
+      .then((result) => {
+        if (!cancelled) setApps(result);
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load the app list");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  async function toggleInstall(app: MarketplaceApp) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setPendingKey(app.key);
+    setError("");
+    try {
+      const next = app.installed
+        ? await uninstallApp(organizationId, app.key, accessToken)
+        : await installApp(organizationId, app.key, accessToken);
+      setApps(next);
+      onAction(app.installed ? `${app.name} uninstalled.` : `${app.name} installed for the whole workspace.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not change this app");
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  const installedCount = apps.filter((app) => app.installed).length;
+  const visibleApps = showInstalledOnly ? apps.filter((app) => app.installed) : apps;
 
   return (
     <div className="min-h-full bg-white px-6 py-6 text-black">
@@ -8115,59 +10257,109 @@ function AppsScreen({ onAction }: { onAction: (message: string) => void }) {
             onClick={() => setShowInstalledOnly((current) => !current)}
             type="button"
           >
-            Your apps ({installed.length})
+            Your apps ({installedCount})
           </button>
-          {["Categories: all", "Payment type: all"].map((filter) => (
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-xs font-bold hover:bg-slate-50"
-              key={filter}
-              onClick={() => onAction(`${filter} filter opened.`)}
-              type="button"
-            >
-              {filter}
-            </button>
-          ))}
         </div>
       </div>
 
-      {visibleApps.length === 0 ? (
+      {error ? (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+      ) : null}
+
+      {isLoading ? (
+        <p className="mt-8 text-center text-sm text-slate-400">Loading apps…</p>
+      ) : visibleApps.length === 0 ? (
         <p className="mt-8 text-center text-sm text-slate-400">
           No apps installed yet. Browse All Apps and install one.
         </p>
       ) : (
         <div className="mt-3 grid gap-4 lg:grid-cols-3">
-          {visibleApps.map((card) => {
-            const isInstalled = installed.includes(card.name);
-            return (
-              <div
-                className="flex flex-col rounded-md border border-slate-300 p-4 hover:border-[#0067ff] hover:shadow-sm"
-                key={card.name}
-              >
-                <div className="flex gap-4">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center border-4 border-black text-sm font-black">
-                    {card.accent}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-base font-bold text-slate-700">{card.name}</span>
-                    <span className="mt-1 block text-xs text-slate-500">{card.price}</span>
-                  </span>
-                </div>
-                <p className="mt-3 flex-1 text-sm leading-5 text-slate-700">{card.copy}</p>
-                <button
-                  className={cn(
-                    "mt-4 rounded-md py-2 text-sm font-bold",
-                    isInstalled
-                      ? "border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                      : "bg-[#0067ff] text-white hover:bg-[#0050c7]"
-                  )}
-                  onClick={() => toggleInstall(card.name)}
-                  type="button"
-                >
-                  {isInstalled ? "✓ Installed — Uninstall" : "Install"}
-                </button>
+          {visibleApps.map((app) => (
+            <div
+              className="flex flex-col rounded-md border border-slate-300 p-4 hover:border-[#0067ff] hover:shadow-sm"
+              key={app.key}
+            >
+              <div className="flex gap-4">
+                <span className="grid h-11 w-11 shrink-0 place-items-center border-4 border-black text-sm font-black">
+                  {app.name.slice(0, 2).toUpperCase()}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-base font-bold text-slate-700">{app.name}</span>
+                  <span className="mt-1 block text-xs text-slate-500">Free to install</span>
+                </span>
               </div>
-            );
-          })}
+              <p className="mt-3 flex-1 text-sm leading-5 text-slate-700">{app.description}</p>
+              {app.setupHint ? (
+                <p className="mt-2 text-xs text-slate-500">Set up in: {app.setupHint}</p>
+              ) : null}
+              <button
+                className={cn(
+                  "mt-4 rounded-md py-2 text-sm font-bold disabled:opacity-60",
+                  app.installed
+                    ? "border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "bg-[#0067ff] text-white hover:bg-[#0050c7]"
+                )}
+                disabled={pendingKey === app.key}
+                onClick={() => void toggleInstall(app)}
+                type="button"
+              >
+                {pendingKey === app.key ? "Working…" : app.installed ? "✓ Installed — Uninstall" : "Install"}
+              </button>
+
+              {app.installed && APP_SETTINGS_FIELDS[app.key] ? (
+                <>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      className="flex-1 rounded-md border border-slate-300 py-1.5 text-xs font-bold hover:bg-slate-50"
+                      onClick={() => openSettings(app)}
+                      type="button"
+                    >
+                      {openSettingsKey === app.key ? "Close keys" : "Keys & setup"}
+                    </button>
+                    <button
+                      className="flex-1 rounded-md border border-slate-300 py-1.5 text-xs font-bold hover:bg-slate-50 disabled:opacity-50"
+                      disabled={pendingKey === app.key}
+                      onClick={() => void runTest(app)}
+                      type="button"
+                    >
+                      Send test
+                    </button>
+                  </div>
+
+                  {openSettingsKey === app.key ? (
+                    <form
+                      className="mt-2 grid gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveSettings(app);
+                      }}
+                    >
+                      {(APP_SETTINGS_FIELDS[app.key] ?? []).map((field) => (
+                        <label className="grid gap-1 text-[11px] font-semibold text-slate-600" key={field.key}>
+                          {field.label}
+                          <input
+                            className="rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal"
+                            onChange={(event) =>
+                              setDraftSettings((current) => ({ ...current, [field.key]: event.target.value }))
+                            }
+                            placeholder={field.placeholder}
+                            type={field.secret ? "password" : "text"}
+                            value={draftSettings[field.key] ?? ""}
+                          />
+                        </label>
+                      ))}
+                      <button
+                        className="rounded-md bg-[#0067ff] py-1.5 text-xs font-bold text-white hover:bg-[#0050c7]"
+                        type="submit"
+                      >
+                        Save keys
+                      </button>
+                    </form>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -8318,7 +10510,7 @@ function TicketsScreen({
 
       {openCount > 0 && (
         <p className="mb-3 text-xs font-semibold text-slate-500">
-          {openCount} open ticket{openCount > 1 ? "s" : ""} need attention
+          {openCount} open ticket{openCount > 1 ? "s need" : " needs"} attention
         </p>
       )}
 
@@ -8850,8 +11042,940 @@ function CompanyDetailsPanel({
   );
 }
 
+function WidgetSwitcher({
+  onAdd,
+  onDelete,
+  onSelect,
+  selectedId,
+  widgets
+}: {
+  onAdd: (name: string) => Promise<boolean>;
+  onDelete: (widgetId: string) => Promise<boolean>;
+  onSelect: (widgetId: string) => void;
+  selectedId: string | null;
+  widgets: WidgetInstall[];
+}) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (widgets.length === 0) {
+    return null;
+  }
+
+  async function add(event: FormEvent) {
+    event.preventDefault();
+    setIsSaving(true);
+    const ok = await onAdd(name.trim());
+    setIsSaving(false);
+    if (ok) {
+      setName("");
+      setIsAdding(false);
+    }
+  }
+
+  return (
+    <div className="mb-5 rounded-lg border border-slate-200 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Widgets</span>
+        {widgets.map((widget) => (
+          <button
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold",
+              widget.id === selectedId
+                ? "border-[#0067ff] bg-[#eef3ff] text-[#0067ff]"
+                : "border-slate-300 text-slate-600 hover:bg-slate-50"
+            )}
+            key={widget.id}
+            onClick={() => onSelect(widget.id)}
+            type="button"
+          >
+            {widget.name}
+          </button>
+        ))}
+        <button
+          className="rounded-full border border-dashed border-slate-400 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          onClick={() => setIsAdding((current) => !current)}
+          type="button"
+        >
+          {isAdding ? "Cancel" : "+ Add widget"}
+        </button>
+        {widgets.length > 1 && selectedId ? (
+          <button
+            className="ml-auto rounded-md px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+            onClick={() => void onDelete(selectedId)}
+            type="button"
+          >
+            Remove this widget
+          </button>
+        ) : null}
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">
+        One widget per website or brand. Each has its own install code, colours and messages, and
+        every chat shows which one it came from.
+      </p>
+
+      {isAdding ? (
+        <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => void add(event)}>
+          <input
+            autoFocus
+            className="h-9 min-w-[220px] flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-[#0067ff]"
+            maxLength={120}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Website or brand name, e.g. Acme Store"
+            value={name}
+          />
+          <button
+            className="rounded-md bg-[#0067ff] px-4 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+            disabled={isSaving || !name.trim()}
+            type="submit"
+          >
+            {isSaving ? "Adding…" : "Add widget"}
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+const FLOW_STEP_KINDS: Array<{ type: FlowNodeType; label: string; hint: string; tone: string }> = [
+  { type: "message", label: "Say something", hint: "The bot writes a message", tone: "border-sky-300 bg-sky-50" },
+  { type: "question", label: "Ask a question", hint: "Buttons the visitor picks from", tone: "border-violet-300 bg-violet-50" },
+  { type: "collect", label: "Collect a detail", hint: "Save the answer on the customer", tone: "border-amber-300 bg-amber-50" },
+  { type: "condition", label: "Branch on words", hint: "Go one way or another", tone: "border-teal-300 bg-teal-50" },
+  { type: "handoff", label: "Hand to a human", hint: "Stop the bot, alert the team", tone: "border-rose-300 bg-rose-50" },
+  { type: "end", label: "End", hint: "Finish the flow", tone: "border-slate-300 bg-slate-50" }
+];
+
+const NODE_WIDTH = 210;
+const NODE_HEIGHT = 96;
+
+const FALLBACK_STEP_KIND = {
+  type: "message" as FlowNodeType,
+  label: "Say something",
+  hint: "The bot writes a message",
+  tone: "border-sky-300 bg-sky-50"
+};
+
+function stepKind(type: FlowNodeType) {
+  return FLOW_STEP_KINDS.find((kind) => kind.type === type) ?? FALLBACK_STEP_KIND;
+}
+
+/**
+ * The chatbot builder: step cards you drag around a canvas, with lines showing where each
+ * answer leads. The same steps the engine walks a visitor through at chat time.
+ */
+function BotFlowBuilderScreen({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [flows, setFlows] = useState<BotFlow[]>([]);
+  const [flowId, setFlowId] = useState<string | null>(null);
+  const [nodes, setNodes] = useState<FlowNode[]>([]);
+  const [startNodeId, setStartNodeId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [error, setError] = useState("");
+  const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  const flow = flows.find((item) => item.id === flowId) ?? null;
+  const selected = nodes.find((node) => node.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    listBotFlows(organizationId, accessToken)
+      .then((result) => {
+        if (cancelled) return;
+        setFlows(result);
+        const first = result[0];
+        if (first) {
+          setFlowId(first.id);
+          setNodes(first.nodes);
+          setStartNodeId(first.startNodeId);
+        }
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load the chatbots");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  function openFlow(next: BotFlow) {
+    setFlowId(next.id);
+    setNodes(next.nodes);
+    setStartNodeId(next.startNodeId);
+    setSelectedId(null);
+    setIsDirty(false);
+  }
+
+  async function addFlow() {
+    if (!accessToken || !organizationId || !newName.trim()) {
+      return;
+    }
+    setError("");
+    try {
+      const created = await createBotFlow(organizationId, accessToken, newName.trim());
+      setFlows((current) => [...current, created]);
+      openFlow(created);
+      setNewName("");
+      onAction(`"${created.name}" created — draw the steps, then switch it on.`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not create the chatbot");
+    }
+  }
+
+  async function save(extra: { isActive?: boolean } = {}) {
+    if (!accessToken || !organizationId || !flowId) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const updated = await updateBotFlow(organizationId, flowId, accessToken, {
+        nodes,
+        startNodeId,
+        ...extra
+      });
+      setFlows((current) =>
+        current.map((item) =>
+          item.id === updated.id ? updated : extra.isActive ? { ...item, isActive: false } : item
+        )
+      );
+      setIsDirty(false);
+      onAction(
+        extra.isActive === true
+          ? "Chatbot is live — it answers visitors now."
+          : extra.isActive === false
+            ? "Chatbot switched off."
+            : "Chatbot saved."
+      );
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save the chatbot");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeFlow() {
+    if (!accessToken || !organizationId || !flowId) {
+      return;
+    }
+    try {
+      await deleteBotFlow(organizationId, flowId, accessToken);
+      const remaining = flows.filter((item) => item.id !== flowId);
+      setFlows(remaining);
+      if (remaining[0]) {
+        openFlow(remaining[0]);
+      } else {
+        setFlowId(null);
+        setNodes([]);
+        setStartNodeId(null);
+      }
+      onAction("Chatbot deleted.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not delete the chatbot");
+    }
+  }
+
+  function addStep(type: FlowNodeType) {
+    const id = `s${Math.random().toString(36).slice(2, 8)}`;
+    const node: FlowNode = {
+      id,
+      type,
+      text:
+        type === "question"
+          ? "What would you like to do?"
+          : type === "collect"
+            ? "What is your email address?"
+            : type === "handoff"
+              ? "Let me get a colleague to help you."
+              : type === "end"
+                ? "Thanks for chatting!"
+                : "Hello!",
+      ...(type === "question" ? { choices: [{ label: "Yes", next: null }, { label: "No", next: null }] } : {}),
+      ...(type === "collect" ? { field: "email" as const } : {}),
+      ...(type === "condition" ? { keywords: ["price"] } : {}),
+      x: 40 + (nodes.length % 4) * 240,
+      y: 40 + Math.floor(nodes.length / 4) * 150
+    };
+    setNodes((current) => [...current, node]);
+    setSelectedId(id);
+    setIsDirty(true);
+    if (!startNodeId) {
+      setStartNodeId(id);
+    }
+  }
+
+  function patchNode(id: string, patch: Partial<FlowNode>) {
+    setNodes((current) => current.map((node) => (node.id === id ? { ...node, ...patch } : node)));
+    setIsDirty(true);
+  }
+
+  function removeNode(id: string) {
+    setNodes((current) =>
+      current
+        .filter((node) => node.id !== id)
+        // clear any connection that pointed at the deleted step
+        .map((node) => ({
+          ...node,
+          ...(node.next === id ? { next: null } : {}),
+          ...(node.whenMatch === id ? { whenMatch: null } : {}),
+          ...(node.otherwise === id ? { otherwise: null } : {}),
+          ...(node.choices
+            ? { choices: node.choices.map((choice) => (choice.next === id ? { ...choice, next: null } : choice)) }
+            : {})
+        }))
+    );
+    if (startNodeId === id) {
+      setStartNodeId(null);
+    }
+    setSelectedId(null);
+    setIsDirty(true);
+  }
+
+  function onPointerDown(event: React.PointerEvent, node: FlowNode) {
+    const canvas = canvasRef.current?.getBoundingClientRect();
+    if (!canvas) return;
+    dragRef.current = {
+      id: node.id,
+      offsetX: event.clientX - canvas.left - (node.x ?? 0),
+      offsetY: event.clientY - canvas.top - (node.y ?? 0)
+    };
+    setSelectedId(node.id);
+    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+  }
+
+  function onPointerMove(event: React.PointerEvent) {
+    const drag = dragRef.current;
+    const canvas = canvasRef.current?.getBoundingClientRect();
+    if (!drag || !canvas) return;
+    const x = Math.max(0, Math.round(event.clientX - canvas.left - drag.offsetX));
+    const y = Math.max(0, Math.round(event.clientY - canvas.top - drag.offsetY));
+    setNodes((current) => current.map((node) => (node.id === drag.id ? { ...node, x, y } : node)));
+    setIsDirty(true);
+  }
+
+  function endDrag() {
+    dragRef.current = null;
+  }
+
+  /** Every connection, as a line from one card's bottom to another card's top. */
+  const edges = nodes.flatMap((node) => {
+    const targets: Array<{ to: string; label?: string }> = [];
+    if (node.next) targets.push({ to: node.next });
+    if (node.whenMatch) targets.push({ to: node.whenMatch, label: "match" });
+    if (node.otherwise) targets.push({ to: node.otherwise, label: "else" });
+    node.choices?.forEach((choice) => {
+      if (choice.next) targets.push({ to: choice.next, label: choice.label });
+    });
+
+    return targets.flatMap(({ to, label }) => {
+      const target = nodes.find((item) => item.id === to);
+      if (!target) return [];
+      return [
+        {
+          key: `${node.id}->${to}-${label ?? ""}`,
+          x1: (node.x ?? 0) + NODE_WIDTH / 2,
+          y1: (node.y ?? 0) + NODE_HEIGHT,
+          x2: (target.x ?? 0) + NODE_WIDTH / 2,
+          y2: target.y ?? 0,
+          label
+        }
+      ];
+    });
+  });
+
+  const canvasHeight = Math.max(560, ...nodes.map((node) => (node.y ?? 0) + NODE_HEIGHT + 80));
+  const canvasWidth = Math.max(900, ...nodes.map((node) => (node.x ?? 0) + NODE_WIDTH + 80));
+
+  return (
+    <div className="min-h-full bg-white px-6 py-6 text-black">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-bold">Chatbot flow builder</h2>
+        {flows.map((item) => (
+          <button
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold",
+              item.id === flowId
+                ? "border-[#0067ff] bg-[#eef3ff] text-[#0067ff]"
+                : "border-slate-300 text-slate-600 hover:bg-slate-50"
+            )}
+            key={item.id}
+            onClick={() => openFlow(item)}
+            type="button"
+          >
+            {item.name}
+            {item.isActive ? " • live" : ""}
+          </button>
+        ))}
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void addFlow();
+          }}
+        >
+          <input
+            className="h-8 rounded-md border border-slate-300 px-2 text-xs outline-none focus:border-[#0067ff]"
+            onChange={(event) => setNewName(event.target.value)}
+            placeholder="New chatbot name"
+            value={newName}
+          />
+          <button
+            className="rounded-md border border-dashed border-slate-400 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            disabled={!newName.trim()}
+            type="submit"
+          >
+            + New chatbot
+          </button>
+        </form>
+      </div>
+
+      {error ? (
+        <p className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+      ) : null}
+
+      {isLoading ? (
+        <p className="text-sm text-slate-500">Loading…</p>
+      ) : !flow ? (
+        <p className="rounded-lg border border-slate-200 p-5 text-sm text-slate-600">
+          No chatbot yet. Name one above and the builder opens with a greeting, a question and a
+          hand-over already drawn.
+        </p>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {FLOW_STEP_KINDS.map((kind) => (
+              <button
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold hover:border-[#0067ff] hover:bg-[#eef3ff]"
+                key={kind.type}
+                onClick={() => addStep(kind.type)}
+                type="button"
+              >
+                + {kind.label}
+              </button>
+            ))}
+            <span className="ml-auto flex items-center gap-2">
+              <button
+                className="rounded-md bg-[#0067ff] px-4 py-2 text-xs font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+                disabled={isSaving}
+                onClick={() => void save()}
+                type="button"
+              >
+                {isSaving ? "Saving…" : isDirty ? "Save changes" : "Saved"}
+              </button>
+              <button
+                className={cn(
+                  "rounded-md px-4 py-2 text-xs font-bold",
+                  flow.isActive
+                    ? "border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                )}
+                disabled={isSaving}
+                onClick={() => void save({ isActive: !flow.isActive })}
+                type="button"
+              >
+                {flow.isActive ? "● Live — switch off" : "Switch on"}
+              </button>
+              <button
+                className="rounded-md px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                onClick={() => void removeFlow()}
+                type="button"
+              >
+                Delete
+              </button>
+            </span>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div
+              className="relative overflow-auto rounded-lg border border-slate-200 bg-[radial-gradient(circle,#e2e8f0_1px,transparent_1px)] [background-size:20px_20px]"
+              onPointerLeave={endDrag}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              ref={canvasRef}
+              style={{ height: 560 }}
+            >
+              <div style={{ height: canvasHeight, width: canvasWidth, position: "relative" }}>
+                <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                  {edges.map((edge) => (
+                    <g key={edge.key}>
+                      <line
+                        stroke="#94a3b8"
+                        strokeWidth={2}
+                        x1={edge.x1}
+                        x2={edge.x2}
+                        y1={edge.y1}
+                        y2={edge.y2}
+                      />
+                      {edge.label ? (
+                        <text
+                          fill="#64748b"
+                          fontSize={10}
+                          x={(edge.x1 + edge.x2) / 2}
+                          y={(edge.y1 + edge.y2) / 2 - 4}
+                        >
+                          {edge.label}
+                        </text>
+                      ) : null}
+                    </g>
+                  ))}
+                </svg>
+
+                {nodes.map((node) => {
+                  const kind = stepKind(node.type);
+                  return (
+                    <div
+                      className={cn(
+                        "absolute cursor-move select-none rounded-lg border-2 p-3 shadow-sm",
+                        kind.tone,
+                        node.id === selectedId ? "ring-2 ring-[#0067ff]" : ""
+                      )}
+                      data-node-id={node.id}
+                      key={node.id}
+                      onPointerDown={(event) => onPointerDown(event, node)}
+                      style={{ left: node.x ?? 0, top: node.y ?? 0, width: NODE_WIDTH }}
+                    >
+                      <p className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                        {kind.label}
+                        {startNodeId === node.id ? (
+                          <span className="rounded bg-[#0067ff] px-1.5 py-0.5 text-[9px] text-white">First</span>
+                        ) : null}
+                      </p>
+                      <p className="mt-1 line-clamp-3 text-xs text-slate-800">
+                        {node.text || <span className="text-slate-400">(no message)</span>}
+                      </p>
+                      {node.choices?.length ? (
+                        <p className="mt-1 truncate text-[10px] text-slate-500">
+                          {node.choices.map((choice) => choice.label).join(" · ")}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 p-4">
+              {!selected ? (
+                <p className="text-sm text-slate-500">
+                  Pick a step on the canvas to edit it, or add one from the buttons above. Drag cards
+                  to rearrange them; the lines show where each answer leads.
+                </p>
+              ) : (
+                <div className="grid gap-3 text-xs">
+                  <p className="text-sm font-bold">{stepKind(selected.type).label}</p>
+                  <p className="text-slate-500">{stepKind(selected.type).hint}</p>
+
+                  <label className="grid gap-1 font-semibold text-slate-600">
+                    What the bot says
+                    <textarea
+                      className="min-h-[70px] rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                      onChange={(event) => patchNode(selected.id, { text: event.target.value })}
+                      value={selected.text ?? ""}
+                    />
+                  </label>
+
+                  {selected.type === "question" ? (
+                    <div className="grid gap-2">
+                      <span className="font-semibold text-slate-600">Buttons</span>
+                      {(selected.choices ?? []).map((choice, index) => (
+                        <div className="grid gap-1 rounded-md border border-slate-200 p-2" key={index}>
+                          <input
+                            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                            onChange={(event) => {
+                              const choices = [...(selected.choices ?? [])];
+                              choices[index] = { label: event.target.value, next: choices[index]?.next ?? null };
+                              patchNode(selected.id, { choices });
+                            }}
+                            placeholder="Button text"
+                            value={choice.label}
+                          />
+                          <select
+                            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                            onChange={(event) => {
+                              const choices = [...(selected.choices ?? [])];
+                              choices[index] = { label: choices[index]?.label ?? "", next: event.target.value || null };
+                              patchNode(selected.id, { choices });
+                            }}
+                            value={choice.next ?? ""}
+                          >
+                            <option value="">→ ends the chat</option>
+                            {nodes
+                              .filter((node) => node.id !== selected.id)
+                              .map((node) => (
+                                <option key={node.id} value={node.id}>
+                                  → {node.text?.slice(0, 30) || node.id}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            className="justify-self-start text-[11px] font-semibold text-rose-600"
+                            onClick={() => {
+                              const choices = (selected.choices ?? []).filter((_, i) => i !== index);
+                              patchNode(selected.id, { choices });
+                            }}
+                            type="button"
+                          >
+                            Remove button
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        className="justify-self-start rounded-md border border-dashed border-slate-400 px-2 py-1 font-semibold text-slate-600"
+                        onClick={() =>
+                          patchNode(selected.id, {
+                            choices: [...(selected.choices ?? []), { label: "New option", next: null }]
+                          })
+                        }
+                        type="button"
+                      >
+                        + Add button
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {selected.type === "collect" ? (
+                    <label className="grid gap-1 font-semibold text-slate-600">
+                      Save the answer as
+                      <select
+                        className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                        onChange={(event) =>
+                          patchNode(selected.id, {
+                            field: event.target.value as NonNullable<FlowNode["field"]>
+                          })
+                        }
+                        value={selected.field ?? "email"}
+                      >
+                        <option value="name">Name</option>
+                        <option value="email">Email</option>
+                        <option value="phone">Phone</option>
+                        <option value="company">Company</option>
+                      </select>
+                    </label>
+                  ) : null}
+
+                  {selected.type === "condition" ? (
+                    <label className="grid gap-1 font-semibold text-slate-600">
+                      Words to look for (comma separated)
+                      <input
+                        className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                        onChange={(event) =>
+                          patchNode(selected.id, {
+                            keywords: event.target.value.split(",").map((word) => word.trim()).filter(Boolean)
+                          })
+                        }
+                        value={(selected.keywords ?? []).join(", ")}
+                      />
+                    </label>
+                  ) : null}
+
+                  {selected.type === "condition" ? (
+                    <>
+                      <label className="grid gap-1 font-semibold text-slate-600">
+                        If the words match
+                        <select
+                          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                          onChange={(event) => patchNode(selected.id, { whenMatch: event.target.value || null })}
+                          value={selected.whenMatch ?? ""}
+                        >
+                          <option value="">→ ends the chat</option>
+                          {nodes.filter((node) => node.id !== selected.id).map((node) => (
+                            <option key={node.id} value={node.id}>
+                              → {node.text?.slice(0, 30) || node.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 font-semibold text-slate-600">
+                        Otherwise
+                        <select
+                          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                          onChange={(event) => patchNode(selected.id, { otherwise: event.target.value || null })}
+                          value={selected.otherwise ?? ""}
+                        >
+                          <option value="">→ ends the chat</option>
+                          {nodes.filter((node) => node.id !== selected.id).map((node) => (
+                            <option key={node.id} value={node.id}>
+                              → {node.text?.slice(0, 30) || node.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
+
+                  {selected.type === "message" || selected.type === "collect" ? (
+                    <label className="grid gap-1 font-semibold text-slate-600">
+                      Then go to
+                      <select
+                        className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                        onChange={(event) => patchNode(selected.id, { next: event.target.value || null })}
+                        value={selected.next ?? ""}
+                      >
+                        <option value="">→ ends the chat</option>
+                        {nodes.filter((node) => node.id !== selected.id).map((node) => (
+                          <option key={node.id} value={node.id}>
+                            → {node.text?.slice(0, 30) || node.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <button
+                      className={cn(
+                        "rounded-md border px-3 py-1.5 font-semibold",
+                        startNodeId === selected.id
+                          ? "border-[#0067ff] bg-[#eef3ff] text-[#0067ff]"
+                          : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                      )}
+                      onClick={() => {
+                        setStartNodeId(selected.id);
+                        setIsDirty(true);
+                      }}
+                      type="button"
+                    >
+                      {startNodeId === selected.id ? "First step" : "Make first step"}
+                    </button>
+                    <button
+                      className="rounded-md px-3 py-1.5 font-semibold text-rose-600 hover:bg-rose-50"
+                      onClick={() => removeNode(selected.id)}
+                      type="button"
+                    >
+                      Delete step
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface CarouselCard {
+  title: string;
+  subtitle: string;
+  image: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}
+
+const EMPTY_CAROUSEL_CARD: CarouselCard = {
+  title: "",
+  subtitle: "",
+  image: "",
+  buttonLabel: "",
+  buttonUrl: ""
+};
+
+const EYE_CATCHER_THEMES: Array<{ id: string; label: string; preview: string }> = [
+  { id: "bubble", label: "Bubble", preview: "rounded-2xl bg-white text-slate-900 shadow-lg" },
+  { id: "card", label: "Card", preview: "rounded-xl bg-white text-slate-900 shadow-lg border-l-4 border-[#ff5a00]" },
+  { id: "banner", label: "Banner", preview: "rounded-lg bg-[#ff5a00] text-white font-bold shadow-lg" },
+  { id: "pill", label: "Pill", preview: "rounded-full bg-white text-slate-900 shadow-lg" },
+  { id: "dark", label: "Dark", preview: "rounded-2xl bg-[#1f1f23] text-white shadow-lg" },
+  { id: "avatar", label: "With avatar", preview: "rounded-2xl bg-white text-slate-900 shadow-lg pl-9" }
+];
+
+/** Pick how the teaser bubble looks; each option is drawn the way the widget draws it. */
+function EyeCatcherThemePicker({
+  onPick,
+  selected,
+  text
+}: {
+  onPick: (theme: string) => void;
+  selected: string;
+  text: string;
+}) {
+  return (
+    <div className="mt-5 rounded-lg border border-slate-200 p-5">
+      <p className="text-sm font-bold">Teaser look</p>
+      <p className="mt-1 text-xs text-slate-500">
+        Six ready-made looks. Pick one — visitors see it above the chat button.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {EYE_CATCHER_THEMES.map((theme) => (
+          <button
+            className={cn(
+              "rounded-xl border p-3 text-left",
+              selected === theme.id
+                ? "border-[#0067ff] ring-2 ring-[#0067ff]/30"
+                : "border-slate-200 hover:border-slate-400"
+            )}
+            key={theme.id}
+            onClick={() => onPick(theme.id)}
+            type="button"
+          >
+            <span className="mb-2 block text-xs font-bold text-slate-600">{theme.label}</span>
+            <span className={cn("relative block px-3 py-2 text-[11px] leading-snug", theme.preview)}>
+              {theme.id === "avatar" ? (
+                <span className="absolute left-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#ff5a00] text-[10px]">
+                  💬
+                </span>
+              ) : null}
+              {text}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Build a row of cards (plans, products, articles) and send it into the chat. */
+function CarouselModal({
+  isSending,
+  onClose,
+  onSubmit
+}: {
+  isSending: boolean;
+  onClose: () => void;
+  onSubmit: (cards: CarouselCard[]) => Promise<void>;
+}) {
+  const [cards, setCards] = useState<CarouselCard[]>([{ ...EMPTY_CAROUSEL_CARD }]);
+
+  function patch(index: number, patchValue: Partial<CarouselCard>) {
+    setCards((current) =>
+      current.map((card, position) => (position === index ? { ...card, ...patchValue } : card))
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/50 p-4" role="presentation">
+      <div
+        aria-modal="true"
+        className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-xl bg-white p-5 text-black shadow-2xl"
+        role="dialog"
+      >
+        <p className="text-sm font-bold">Send a carousel</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Up to 10 cards the visitor can swipe through. A card with a link opens it; without one,
+          tapping sends the card title as the visitor&apos;s reply.
+        </p>
+
+        <div className="mt-4 grid gap-3">
+          {cards.map((card, index) => (
+            <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-2" key={index}>
+              <label className="grid gap-1 text-[11px] font-semibold text-slate-600">
+                Title
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                  onChange={(event) => patch(index, { title: event.target.value })}
+                  placeholder="Business plan"
+                  value={card.title}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] font-semibold text-slate-600">
+                Subtitle
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                  onChange={(event) => patch(index, { subtitle: event.target.value })}
+                  placeholder="$89 per agent / month"
+                  value={card.subtitle}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] font-semibold text-slate-600">
+                Image URL
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                  onChange={(event) => patch(index, { image: event.target.value })}
+                  placeholder="https://…/plan.png"
+                  value={card.image}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] font-semibold text-slate-600">
+                Button text
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                  onChange={(event) => patch(index, { buttonLabel: event.target.value })}
+                  placeholder="See details"
+                  value={card.buttonLabel}
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] font-semibold text-slate-600 md:col-span-2">
+                Button link (optional)
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm font-normal"
+                  onChange={(event) => patch(index, { buttonUrl: event.target.value })}
+                  placeholder="https://acme.com/pricing"
+                  value={card.buttonUrl}
+                />
+              </label>
+              {cards.length > 1 ? (
+                <button
+                  className="justify-self-start text-[11px] font-semibold text-rose-600 md:col-span-2"
+                  onClick={() => setCards((current) => current.filter((_, position) => position !== index))}
+                  type="button"
+                >
+                  Remove card
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <button
+            className="rounded-md border border-dashed border-slate-400 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+            disabled={cards.length >= 10}
+            onClick={() => setCards((current) => [...current, { ...EMPTY_CAROUSEL_CARD }])}
+            type="button"
+          >
+            + Add card
+          </button>
+          <span className="flex gap-2">
+            <button
+              className="rounded-md px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-md bg-[#0067ff] px-4 py-2 text-xs font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+              disabled={isSending || !cards.some((card) => card.title.trim())}
+              onClick={() => void onSubmit(cards)}
+              type="button"
+            >
+              {isSending ? "Sending…" : "Send carousel"}
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsScreen({
+  accessToken,
   activeSecondary,
+  organizationId,
   onAction,
   onClearVisitorData,
   onCopy,
@@ -8859,9 +11983,19 @@ function SettingsScreen({
   onUpdateOrganization,
   onUpdateWidget,
   organization,
-  widgetInstall
+  widgetInstall,
+  widgets,
+  onAddWidget,
+  onDeleteWidget,
+  onSelectWidget
 }: {
+  widgets: WidgetInstall[];
+  onAddWidget: (name: string) => Promise<boolean>;
+  onDeleteWidget: (widgetId: string) => Promise<boolean>;
+  onSelectWidget: (widgetId: string) => void;
+  accessToken: string | null;
   activeSecondary: string;
+  organizationId: string | null;
   onUpdateOrganization: (input: {
     name?: string;
     slug?: string;
@@ -8894,6 +12028,7 @@ function SettingsScreen({
     workingHours?: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> };
     eyeCatcher?: string;
     eyeCatcherEnabled?: boolean;
+    eyeCatcherTheme?: string;
     slackWebhookUrl?: string;
     preChatFields?: Array<{ id: string; label: string; type: string; required: boolean }>;
     postChatEnabled?: boolean;
@@ -8965,6 +12100,14 @@ function SettingsScreen({
     </div>
   );
 
+  if (activeSecondary === "Audit log") {
+    return settingsTab(
+      "Audit log",
+      "Who did what in this workspace: logins, member and role changes, billing and data actions.",
+      <AuditLogPanel accessToken={accessToken} organizationId={organizationId} />
+    );
+  }
+
   if (activeSecondary === "Security") {
     return settingsTab(
       "Security",
@@ -9009,6 +12152,7 @@ function SettingsScreen({
     return settingsTab(
       "Engagement",
       "Show a teaser bubble to invite visitors to chat before they open the widget.",
+      <>
       <SimpleWidgetPanel
         description="A teaser bubble that appears above the widget to invite visitors to chat."
         fieldLabel="Teaser text"
@@ -9019,6 +12163,12 @@ function SettingsScreen({
         toggleLabel="Show eye-catcher"
         toggleValue={widgetInstall?.eyeCatcherEnabled ?? false}
       />
+      <EyeCatcherThemePicker
+        onPick={(theme) => onUpdateWidget({ eyeCatcherTheme: theme })}
+        selected={widgetInstall?.eyeCatcherTheme ?? "bubble"}
+        text={widgetInstall?.eyeCatcher || "👋 Need help? Chat with us!"}
+      />
+      </>
     );
   }
 
@@ -9045,14 +12195,23 @@ function SettingsScreen({
     );
   }
 
-  if (activeSecondary === "Facebook Messenger" || activeSecondary === "Apple Messages") {
+  if (activeSecondary === "Messaging channels") {
     return settingsTab(
-      activeSecondary,
-      "Connect this channel to reply from your inbox.",
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        This channel needs provider credentials in your <code>.env</code> before it can be connected.
-        Website chat works out of the box today.
-      </div>
+      "Messaging channels",
+      "Answer WhatsApp, Messenger and Instagram messages in the same inbox as your website chats.",
+      <MessagingChannelsPanel
+        accessToken={accessToken}
+        onAction={onAction}
+        organizationId={organizationId}
+      />
+    );
+  }
+
+  if (activeSecondary === "Single sign-on") {
+    return settingsTab(
+      "Single sign-on",
+      "Let your team sign in with your company account. Anyone with an email on your domain is sent to your identity provider.",
+      <SsoPanel accessToken={accessToken} onAction={onAction} organizationId={organizationId} />
     );
   }
 
@@ -9160,6 +12319,13 @@ function SettingsScreen({
   // "Install LiveChat", "Website widget" → the install + customize screen below.
   return (
     <div className="min-h-full bg-white px-6 py-6 text-black">
+      <WidgetSwitcher
+        onAdd={onAddWidget}
+        onDelete={onDeleteWidget}
+        onSelect={onSelectWidget}
+        selectedId={widgetInstall?.id ?? null}
+        widgets={widgets}
+      />
       <div className="mb-4">
         <h2 className="font-bold">Install website widget <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">Installed</span></h2>
         <p className="mt-2 text-sm text-slate-600">
@@ -10280,6 +13446,7 @@ function WorkingHoursPanel({
     workingHours?: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> };
     eyeCatcher?: string;
     eyeCatcherEnabled?: boolean;
+    eyeCatcherTheme?: string;
     slackWebhookUrl?: string;
   }) => Promise<boolean>;
   schedule: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> } | null;
@@ -10420,6 +13587,7 @@ function SettingsDetailModal({
     workingHours?: { timezone?: string; days?: Array<{ on: boolean; from: string; to: string }> };
     eyeCatcher?: string;
     eyeCatcherEnabled?: boolean;
+    eyeCatcherTheme?: string;
     slackWebhookUrl?: string;
     preChatEnabled?: boolean;
     preChatFields?: Array<{ id: string; label: string; type: string; required: boolean }>;
@@ -10639,7 +13807,7 @@ function SettingsDetailModal({
   );
 }
 
-const SUPPORT_API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+
 const SUPPORT_WIDGET_KEY = "lcw_support_desk";
 
 interface SupportMessage {
@@ -10650,7 +13818,7 @@ interface SupportMessage {
 }
 
 async function supportFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${SUPPORT_API}/widgets/public/${SUPPORT_WIDGET_KEY}${path}`, {
+  const res = await fetch(`${apiBaseUrl()}/widgets/public/${SUPPORT_WIDGET_KEY}${path}`, {
     ...options,
     headers: { "content-type": "application/json", ...(options?.headers ?? {}) }
   });
@@ -11013,19 +14181,66 @@ function ProfileMenu({
   );
 }
 
-function NotificationPanel({ onClose }: { onClose: () => void }) {
+function NotificationPanel({
+  notifications,
+  onClose,
+  onMarkAllRead,
+  onOpenConversation,
+  unread
+}: {
+  notifications: AppNotification[];
+  onClose: () => void;
+  onMarkAllRead: () => void;
+  onOpenConversation: (conversationId: string) => void;
+  unread: number;
+}) {
   return (
-    <div className="fixed right-2 top-9 z-50 w-72 rounded-lg border border-[#303036] bg-[#1f1f23] p-4 text-white shadow-2xl">
+    <div className="fixed right-2 top-9 z-50 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-[#303036] bg-[#1f1f23] p-4 text-white shadow-2xl">
       <div className="flex items-center justify-between">
-        <h3 className="font-bold">Notifications</h3>
-        <button onClick={onClose} type="button">
-          <X className="h-4 w-4" aria-hidden />
-        </button>
+        <h3 className="font-bold">Notifications{unread > 0 ? ` (${unread})` : ""}</h3>
+        <div className="flex items-center gap-2">
+          {unread > 0 && (
+            <button className="text-xs text-white/60 hover:text-white" onClick={onMarkAllRead} type="button">
+              Mark all read
+            </button>
+          )}
+          <button onClick={onClose} type="button">
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
       </div>
-      <div className="mt-4 rounded-md bg-[#29292f] p-3 text-sm">
-        <p className="font-bold">New ticket rule ready</p>
-        <p className="mt-1 text-white/60">Automation can route urgent billing chats to owners.</p>
-      </div>
+
+      {notifications.length === 0 ? (
+        <p className="mt-4 rounded-md bg-[#29292f] p-3 text-sm text-white/60">
+          Nothing yet. New chats assigned to you show up here.
+        </p>
+      ) : (
+        <div className="mt-3 grid gap-2">
+          {notifications.map((item) => {
+            const conversationId =
+              typeof item.payload.conversationId === "string" ? item.payload.conversationId : null;
+
+            return (
+              <button
+                className={cn(
+                  "rounded-md p-3 text-left text-sm",
+                  item.readAt ? "bg-[#26262b] text-white/70" : "bg-[#29292f]"
+                )}
+                disabled={!conversationId}
+                key={item.id}
+                onClick={() => conversationId && onOpenConversation(conversationId)}
+                type="button"
+              >
+                <p className="font-bold">{item.subject ?? item.type}</p>
+                {item.body ? <p className="mt-1 line-clamp-2 text-white/60">{item.body}</p> : null}
+                <p className="mt-1 text-[10px] text-white/40">
+                  {new Date(item.createdAt).toLocaleString()}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -11243,8 +14458,13 @@ function MessageTimeline({ messages }: { messages: Message[] }) {
 
                 return <p>{message.body ?? "Attachment"}</p>;
               })()}
-              <p className={cn("mt-2 text-[10px]", timeClass)}>
+              <p className={cn("mt-2 flex items-center gap-1 text-[10px]", timeClass)}>
                 {formatTime(message.createdAt)}
+                {message.senderType === "AGENT" && message.visibility === "PUBLIC" ? (
+                  <span title={message.status === "READ" ? "Seen by the visitor" : "Sent"}>
+                    {message.status === "READ" ? "✓✓" : "✓"}
+                  </span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -11406,7 +14626,5 @@ function formatTime(value: string | null) {
 }
 
 function getSocketUrl() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
-
-  return apiUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "") + "/chat";
+  return socketUrl();
 }

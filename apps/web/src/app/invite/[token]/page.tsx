@@ -3,8 +3,8 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { acceptInvitation, previewInvitation } from "@/lib/api";
-import { readSession } from "@/lib/session";
+import { acceptInvitation, previewInvitation, signUpWithInvitation } from "@/lib/api";
+import { clearSession, readSession, saveSession } from "@/lib/session";
 import type { InvitationPreview } from "@/lib/types";
 
 export default function InviteAcceptPage({ params }: { params: Promise<{ token: string }> }) {
@@ -15,6 +15,8 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState("");
   const [hasSession, setHasSession] = useState(false);
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     setHasSession(Boolean(readSession()?.accessToken));
@@ -39,6 +41,30 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
       setAccepting(false);
     }
   }
+
+  async function handleSignUp(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAccepting(true);
+    setError("");
+    try {
+      const auth = await signUpWithInvitation(token, { name, password });
+      saveSession(auth);
+      router.replace("/dashboard");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not create your account");
+      setAccepting(false);
+    }
+  }
+
+  function handleUseAnotherAccount() {
+    clearSession();
+    setHasSession(false);
+    setError("");
+  }
+
+  const loginHref = `/login?next=${encodeURIComponent(`/invite/${token}`)}`;
+  const inputClass =
+    "w-full rounded-lg border border-white/15 bg-[#0b0b0f] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#FF5100]";
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#0b0b0f] px-6 text-white">
@@ -70,34 +96,72 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
             ) : null}
 
             {hasSession ? (
-              <button
-                className="mt-6 w-full rounded-lg bg-[#FF5100] px-5 py-3 text-sm font-bold hover:bg-[#e64a00] disabled:opacity-60"
-                disabled={accepting}
-                onClick={() => void handleAccept()}
-                type="button"
-              >
-                {accepting ? "Joining…" : "Accept & join workspace"}
-              </button>
+              <>
+                <button
+                  className="mt-6 w-full rounded-lg bg-[#FF5100] px-5 py-3 text-sm font-bold hover:bg-[#e64a00] disabled:opacity-60"
+                  disabled={accepting}
+                  onClick={() => void handleAccept()}
+                  type="button"
+                >
+                  {accepting ? "Joining…" : "Accept & join workspace"}
+                </button>
+                <button
+                  className="mt-3 text-xs text-white/50 underline hover:text-white"
+                  onClick={handleUseAnotherAccount}
+                  type="button"
+                >
+                  Not {preview.email}? Use another account
+                </button>
+              </>
             ) : (
-              <div className="mt-6 space-y-3">
-                <p className="text-xs text-white/50">
-                  Sign in with <b>{preview.email}</b> to accept, then reopen this link.
+              <>
+                <form className="mt-6 grid gap-3 text-left" onSubmit={(event) => void handleSignUp(event)}>
+                  <label className="grid gap-1 text-xs font-semibold text-white/70">
+                    Email
+                    <input className={`${inputClass} opacity-70`} readOnly type="email" value={preview.email ?? ""} />
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-white/70">
+                    Your name
+                    <input
+                      autoComplete="name"
+                      className={inputClass}
+                      minLength={2}
+                      name="name"
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Sara Ahmed"
+                      required
+                      value={name}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-white/70">
+                    Choose a password
+                    <input
+                      autoComplete="new-password"
+                      className={inputClass}
+                      minLength={8}
+                      name="password"
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Minimum 8 characters"
+                      required
+                      type="password"
+                      value={password}
+                    />
+                  </label>
+                  <button
+                    className="mt-2 w-full rounded-lg bg-[#FF5100] px-5 py-3 text-sm font-bold hover:bg-[#e64a00] disabled:opacity-60"
+                    disabled={accepting}
+                    type="submit"
+                  >
+                    {accepting ? "Creating account…" : "Create account & join"}
+                  </button>
+                </form>
+                <p className="mt-4 text-xs text-white/50">
+                  Already have an account with {preview.email}?{" "}
+                  <Link className="font-semibold text-white underline" href={loginHref}>
+                    Log in to accept
+                  </Link>
                 </p>
-                <div className="flex gap-2">
-                  <Link
-                    className="flex-1 rounded-lg border border-white/20 px-4 py-2.5 text-sm font-semibold hover:bg-white/10"
-                    href="/login"
-                  >
-                    Log in
-                  </Link>
-                  <Link
-                    className="flex-1 rounded-lg bg-[#FF5100] px-4 py-2.5 text-sm font-bold hover:bg-[#e64a00]"
-                    href="/register"
-                  >
-                    Sign up
-                  </Link>
-                </div>
-              </div>
+              </>
             )}
           </>
         ) : (
