@@ -21,11 +21,20 @@ import {
   VisitorSession
 } from "@prisma/client";
 import { AutomationService } from "../automation/automation.service";
+import { safeFetch } from "../common/network/safe-fetch";
 import { ConversationsGateway } from "../conversations/conversations.gateway";
+import { EntitlementsService } from "../billing/entitlements.service";
+import { maskCardNumbers } from "../common/text/mask-sensitive";
+import { ContactsService } from "../contacts/contacts.service";
+import { NotificationsService } from "../notifications/notifications.service";
+import { SchedulesService } from "../schedules/schedules.service";
+import { ConversationsService } from "../conversations/conversations.service";
 import type { ConversationDto, MessageDto } from "../conversations/dto/conversation-response.dto";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { MailService } from "../mail/mail.service";
+import { IntegrationHubService } from "../apps/integration-hub.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { FileStorageService, type UploadedFileLike } from "../storage/file-storage.service";
 import type { CreateWidgetConversationDto } from "./dto/create-widget-conversation.dto";
 import type { RateWidgetDto } from "./dto/rate-widget.dto";
 import type { RecordSaleDto } from "./dto/record-sale.dto";
@@ -52,9 +61,16 @@ export class WidgetsService {
     private readonly automation: AutomationService,
     private readonly config: ConfigService,
     private readonly gateway: ConversationsGateway,
+    private readonly conversations: ConversationsService,
+    private readonly contacts: ContactsService,
+    private readonly notifications: NotificationsService,
+    private readonly entitlements: EntitlementsService,
+    private readonly schedules: SchedulesService,
     private readonly integrations: IntegrationsService,
     private readonly mail: MailService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly fileStorage: FileStorageService,
+    private readonly integrationHub: IntegrationHubService
   ) {}
 
   async getDefaultInstall(organizationId: string): Promise<WidgetInstallDto> {
@@ -63,12 +79,97 @@ export class WidgetsService {
     return this.mapInstall(widget);
   }
 
+  /** Every widget in the workspace — one per website or brand. */
+  async listInstalls(organizationId: string): Promise<WidgetInstallDto[]> {
+    await this.ensureDefaultWidget(organizationId);
+
+    const widgets = await this.prisma.chatWidget.findMany({
+      where: { organizationId, isEnabled: true },
+      orderBy: { createdAt: "asc" }
+    });
+
+    return widgets.map((widget) => this.mapInstall(widget));
+  }
+
+  async getInstall(organizationId: string, widgetId: string): Promise<WidgetInstallDto> {
+    return this.mapInstall(await this.getOwnedWidget(organizationId, widgetId));
+  }
+
+  /** Add another widget; it starts from the same defaults as the first one. */
+  async createWidget(organizationId: string, name: string): Promise<WidgetInstallDto> {
+    const trimmed = name.trim();
+
+    if (!trimmed) {
+      throw new BadRequestException("Give the widget a name, for example your website's name");
+    }
+
+    const widget = await this.prisma.chatWidget.create({
+      data: {
+        organizationId,
+        name: trimmed.slice(0, 120),
+        publicKey: this.generateWidgetKey(),
+        secretHash: this.hashToken(this.generateWidgetSecret()),
+        welcomeMessage: "Hi there. How can we help?",
+        offlineMessage: "Leave a message and the team will reply soon.",
+        theme: { accentColor: "#ff5a00", position: "right" }
+      }
+    });
+
+    return this.mapInstall(widget);
+  }
+
+  async updateWidget(
+    organizationId: string,
+    widgetId: string,
+    dto: UpdateWidgetDto
+  ): Promise<WidgetInstallDto> {
+    const widget = await this.getOwnedWidget(organizationId, widgetId);
+
+    return this.applyWidgetUpdate(widget, dto);
+  }
+
+  /**
+   * Remove a widget. The workspace always keeps at least one, and past chats stay in the
+   * archive (the database clears their widget link rather than deleting them).
+   */
+  async deleteWidget(organizationId: string, widgetId: string): Promise<{ success: true }> {
+    const widget = await this.getOwnedWidget(organizationId, widgetId);
+    const remaining = await this.prisma.chatWidget.count({
+      where: { organizationId, isEnabled: true, id: { not: widget.id } }
+    });
+
+    if (remaining === 0) {
+      throw new BadRequestException("This is your only widget — add another one before removing it.");
+    }
+
+    await this.prisma.chatWidget.delete({ where: { id: widget.id } });
+
+    return { success: true };
+  }
+
+  private async getOwnedWidget(organizationId: string, widgetId: string): Promise<ChatWidget> {
+    const widget = await this.prisma.chatWidget.findFirst({
+      where: { id: widgetId, organizationId, isEnabled: true }
+    });
+
+    if (!widget) {
+      throw new NotFoundException("Widget not found");
+    }
+
+    return widget;
+  }
+
   async updateDefaultWidget(
     organizationId: string,
     dto: UpdateWidgetDto
   ): Promise<WidgetInstallDto> {
-    const widget = await this.ensureDefaultWidget(organizationId);
+    return this.applyWidgetUpdate(await this.ensureDefaultWidget(organizationId), dto);
+  }
 
+  private async applyWidgetUpdate(
+    widget: ChatWidget,
+    dto: UpdateWidgetDto
+  ): Promise<WidgetInstallDto> {
     const currentTheme =
       widget.theme && typeof widget.theme === "object" && !Array.isArray(widget.theme)
         ? (widget.theme as Record<string, unknown>)
@@ -93,6 +194,9 @@ export class WidgetsService {
       ...(dto.workingHours !== undefined ? { workingHours: dto.workingHours } : {}),
       ...(dto.eyeCatcher !== undefined ? { eyeCatcher: dto.eyeCatcher.trim() } : {}),
       ...(dto.eyeCatcherEnabled !== undefined ? { eyeCatcherEnabled: dto.eyeCatcherEnabled } : {}),
+      ...(dto.eyeCatcherTheme !== undefined
+        ? { eyeCatcherTheme: this.normalizeEyeCatcherTheme(dto.eyeCatcherTheme) }
+        : {}),
       ...(dto.slackWebhookUrl !== undefined ? { slackWebhookUrl: dto.slackWebhookUrl.trim() } : {}),
       ...(dto.preChatFields !== undefined
         ? { preChatFields: this.normalizeFormFields(dto.preChatFields) }
@@ -155,6 +259,8 @@ export class WidgetsService {
 
     this.assertDomainAllowed(widget, metadata.origin);
     this.assertNotBanned(widget, metadata.ipAddress);
+    // Trial over / payment failed: the widget stops taking chats (the dashboard stays open).
+    await this.entitlements.assertActive(widget.organizationId);
 
     const externalId = this.normalizeExternalId(dto.visitorExternalId);
     const visitor = await this.prisma.visitor.upsert({
@@ -227,7 +333,7 @@ export class WidgetsService {
     this.assertDomainAllowed(widget, metadata.origin);
 
     const session = await this.getSessionOrThrow(widget, dto.sessionToken);
-    const body = this.trimBody(dto.body);
+    const body = this.safeBody(dto.body);
 
     if (dto.name || dto.email) {
       await this.prisma.visitor.update({
@@ -242,12 +348,22 @@ export class WidgetsService {
 
     // Auto-routing: assign the new chat to the least-busy online agent (else queue).
     const assignedAgentId = await this.pickAgentForRouting(widget.organizationId);
+    // CRM: the pre-chat details create (or update) the customer record behind this chat.
+    const contact = await this.contacts
+      .linkVisitorToContact({
+        organizationId: widget.organizationId,
+        visitorId: session.visitorId,
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.email ? { email: dto.email } : {})
+      })
+      .catch(() => null);
 
     const result = await this.prisma.$transaction(async (transaction) => {
       const conversation = await transaction.conversation.create({
         data: {
           organizationId: widget.organizationId,
           visitorId: session.visitorId,
+          ...(contact ? { contactId: contact.id } : {}),
           widgetId: widget.id,
           source: ConversationSource.WIDGET,
           status: assignedAgentId ? ConversationStatus.OPEN : ConversationStatus.QUEUED,
@@ -298,6 +414,28 @@ export class WidgetsService {
     this.gateway.emitConversationCreated(conversation);
     this.gateway.emitMessageCreated(message);
 
+    const chatNotification = {
+      organizationId: widget.organizationId,
+      body: result.message?.body ?? "A visitor started a chat.",
+      payload: { conversationId: result.conversation.id }
+    };
+
+    if (assignedAgentId) {
+      this.notifications.notify({
+        ...chatNotification,
+        membershipId: assignedAgentId,
+        type: "chat.assigned",
+        subject: "New chat assigned to you"
+      });
+    } else {
+      // Nobody was online to take it — tell the whole team so the chat isn't missed.
+      void this.notifications.notifyOrganization({
+        ...chatNotification,
+        type: "chat.queued",
+        subject: "New chat waiting in the queue"
+      });
+    }
+
     await this.automation
       .evaluateAndReply(widget.organizationId, conversation.id, body, { isFirstMessage: true })
       .catch(() => {});
@@ -328,11 +466,17 @@ export class WidgetsService {
   ): Promise<void> {
     const theme = this.toRecord(widget.theme);
     const url = typeof theme.slackWebhookUrl === "string" ? theme.slackWebhookUrl.trim() : "";
+    const who = [dto.name, dto.email].filter(Boolean).join(" · ") || "Website visitor";
+    const text = `:speech_balloon: *New chat* on ${widget.name}\n*From:* ${who}\n*Subject:* ${subject ?? "Website chat"}\n> ${body}`;
+
+    // The Slack app (Apps → Slack) carries the webhook for the whole workspace.
+    await this.integrationHub.notifySlack(widget.organizationId, text).catch(() => false);
+
     if (!url) {
       return;
     }
-    const who = [dto.name, dto.email].filter(Boolean).join(" · ") || "Website visitor";
-    await fetch(url, {
+    await safeFetch(url, {
+      maxRedirects: 0,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -516,6 +660,98 @@ export class WidgetsService {
     return mapped;
   }
 
+  /** The visitor's widget reports that it has shown the agent's messages. */
+  async markConversationRead(
+    publicKey: string,
+    conversationId: string,
+    sessionToken: string | undefined,
+    metadata: WidgetRequestMetadata
+  ): Promise<{ readAt: Date; messageIds: string[] }> {
+    const widget = await this.getPublicWidget(publicKey);
+    this.assertDomainAllowed(widget, metadata.origin);
+    const session = await this.getSessionOrThrow(widget, sessionToken ?? "");
+    await this.ensureVisitorConversationAccess(widget, conversationId, sessionToken);
+
+    return this.conversations.markRead(widget.organizationId, conversationId, "VISITOR", {
+      visitorId: session.visitorId
+    });
+  }
+
+  /** A visitor sends a file from the widget (same storage + size limits as agent uploads). */
+  async sendVisitorAttachment(
+    publicKey: string,
+    conversationId: string,
+    sessionToken: string | undefined,
+    file: UploadedFileLike,
+    metadata: WidgetRequestMetadata
+  ): Promise<MessageDto> {
+    const widget = await this.getPublicWidget(publicKey);
+    this.assertDomainAllowed(widget, metadata.origin);
+    this.assertNotBanned(widget, metadata.ipAddress);
+
+    if (!file?.size || !file.buffer?.length) {
+      throw new BadRequestException("The uploaded file is empty");
+    }
+    if (!this.visitorUploadsEnabled(widget)) {
+      throw new ForbiddenException("File uploads are turned off for this chat");
+    }
+
+    const session = await this.getSessionOrThrow(widget, sessionToken ?? "");
+    await this.ensureVisitorConversationAccess(widget, conversationId, sessionToken);
+    const stored = await this.fileStorage.save(widget.organizationId, file);
+
+    const message = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.message.create({
+        data: {
+          organizationId: widget.organizationId,
+          conversationId,
+          senderType: ParticipantType.VISITOR,
+          senderVisitorId: session.visitorId,
+          type: MessageType.FILE,
+          visibility: MessageVisibility.PUBLIC,
+          status: MessageStatus.SENT,
+          body: file.originalname,
+          metadata: {
+            attachment: {
+              fileName: file.originalname,
+              mimeType: file.mimetype,
+              fileSize: file.size,
+              url: stored.publicUrl
+            }
+          } as Prisma.InputJsonValue
+        }
+      });
+
+      await transaction.messageAttachment.create({
+        data: {
+          organizationId: widget.organizationId,
+          messageId: created.id,
+          storageKey: stored.storageKey,
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          fileSize: BigInt(file.size),
+          publicUrl: stored.publicUrl
+        }
+      });
+
+      await transaction.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: created.createdAt }
+      });
+
+      return created;
+    });
+
+    const mapped = this.mapMessage(message);
+    this.gateway.emitMessageCreated(mapped);
+    return mapped;
+  }
+
+  /** Visitor uploads are on unless the widget's theme switches them off. */
+  private visitorUploadsEnabled(widget: ChatWidget): boolean {
+    return this.toRecord(widget.theme).visitorUploads !== false;
+  }
+
   async sendMessage(
     publicKey: string,
     conversationId: string,
@@ -532,7 +768,7 @@ export class WidgetsService {
       conversationId,
       dto.sessionToken
     );
-    const body = this.trimBody(dto.body);
+    const body = this.safeBody(dto.body);
 
     if (dto.idempotencyKey) {
       const existingMessage = await this.prisma.message.findFirst({
@@ -896,6 +1132,14 @@ export class WidgetsService {
   }
 
   /** Chatbot quick-reply menu options stored on the widget theme. */
+  /** Only the looks the widget knows how to draw; anything else falls back to the plain bubble. */
+  private normalizeEyeCatcherTheme(value: unknown): string {
+    const themes = ["bubble", "card", "banner", "pill", "dark", "avatar"];
+    const theme = typeof value === "string" ? value.trim().toLowerCase() : "";
+
+    return themes.includes(theme) ? theme : "bubble";
+  }
+
   private menuOptionsFor(theme: Record<string, unknown>): MenuOptionDto[] {
     if (!Array.isArray(theme.menuOptions)) {
       return [];
@@ -970,6 +1214,7 @@ export class WidgetsService {
           : null,
       eyeCatcher: typeof theme.eyeCatcher === "string" ? theme.eyeCatcher : "",
       eyeCatcherEnabled: theme.eyeCatcherEnabled === true,
+      eyeCatcherTheme: this.normalizeEyeCatcherTheme(theme.eyeCatcherTheme),
       slackWebhookUrl: typeof theme.slackWebhookUrl === "string" ? theme.slackWebhookUrl : "",
       preChatEnabled: theme.preChatEnabled === true,
       preChatFields: this.preChatFieldsFor(theme),
@@ -982,124 +1227,6 @@ export class WidgetsService {
       menuOptions: this.menuOptionsFor(theme),
       publicConfig: this.mapPublicConfig(widget)
     };
-  }
-
-  /**
-   * TEMPORARY diagnostic: given a widget public key, report exactly what the
-   * server computes for that widget's organization (legal mode, add-on, AI mode,
-   * whether the Anthropic key is configured). Booleans only — no secrets, no firm
-   * details. Used to debug why the AI receptionist / legal mode isn't responding.
-   */
-  async getLegalDebug(publicKey: string): Promise<Record<string, unknown>> {
-    const widget = await this.prisma.chatWidget.findFirst({
-      where: { publicKey },
-      select: { organizationId: true }
-    });
-    if (!widget) {
-      return { found: false };
-    }
-    const org = await this.prisma.organization.findUnique({
-      where: { id: widget.organizationId },
-      select: { metadata: true }
-    });
-    const asRecord = (value: unknown): Record<string, unknown> =>
-      value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-    const meta = asRecord(org?.metadata);
-    const legalIntake = asRecord(meta.legalIntake);
-    const addons = asRecord(meta.addons);
-    const aiReceptionist = asRecord(meta.aiReceptionist);
-
-    const legalIntakeEnabled = legalIntake.enabled === true;
-    const addonLegalActive = addons.legal === true;
-    return {
-      found: true,
-      organizationId: widget.organizationId,
-      aiMode: typeof aiReceptionist.mode === "string" ? aiReceptionist.mode : "off",
-      legalIntakeEnabled,
-      addonLegalActive,
-      legalEnabled: legalIntakeEnabled && addonLegalActive,
-      disclaimerConfigured:
-        typeof legalIntake.disclaimer === "string" && legalIntake.disclaimer.trim().length > 0,
-      anthropicKeyConfigured: Boolean((this.config.get<string>("ANTHROPIC_API_KEY") ?? "").trim()),
-      metadataKeys: Object.keys(meta)
-    };
-  }
-
-  /** TEMPORARY diagnostic: dump the latest conversation's messages for a widget's org. */
-  async getMessagesDebug(publicKey: string): Promise<Record<string, unknown>> {
-    const widget = await this.prisma.chatWidget.findFirst({
-      where: { publicKey },
-      select: { organizationId: true }
-    });
-    if (!widget) {
-      return { found: false };
-    }
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { organizationId: widget.organizationId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, createdAt: true }
-    });
-    if (!conversation) {
-      return { found: true, conversation: null };
-    }
-    const messages = await this.prisma.message.findMany({
-      where: { organizationId: widget.organizationId, conversationId: conversation.id },
-      orderBy: { createdAt: "asc" },
-      select: { senderType: true, type: true, body: true, metadata: true, createdAt: true }
-    });
-    return {
-      found: true,
-      organizationId: widget.organizationId,
-      conversationId: conversation.id,
-      messageCount: messages.length,
-      messages: messages.map((m) => ({
-        senderType: m.senderType,
-        type: m.type,
-        body: (m.body ?? "").slice(0, 140),
-        meta: m.metadata
-      }))
-    };
-  }
-
-  /** TEMPORARY diagnostic: ping the Anthropic API to prove the key + model work. */
-  async getAiPing(): Promise<Record<string, unknown>> {
-    const apiKey = (this.config.get<string>("ANTHROPIC_API_KEY") ?? "").trim();
-    if (!apiKey) {
-      return { keyPresent: false };
-    }
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5",
-          max_tokens: 16,
-          messages: [{ role: "user", content: "Reply with the single word: OK" }]
-        }),
-        signal: AbortSignal.timeout(15000)
-      });
-      const raw = await response.text();
-      let sample = "";
-      try {
-        const data = JSON.parse(raw) as { content?: Array<{ text?: string }>; error?: { message?: string } };
-        sample = data.content?.[0]?.text ?? data.error?.message ?? "";
-      } catch {
-        sample = raw.slice(0, 200);
-      }
-      return {
-        keyPresent: true,
-        httpStatus: response.status,
-        ok: response.ok,
-        keyPrefix: apiKey.slice(0, 8),
-        sample: sample.slice(0, 200)
-      };
-    } catch (error) {
-      return { keyPresent: true, ok: false, fetchError: String((error as Error)?.message ?? error) };
-    }
   }
 
   private mapPublicConfig(widget: ChatWidget): PublicWidgetConfigDto {
@@ -1133,6 +1260,7 @@ export class WidgetsService {
       online: this.isWithinWorkingHours(theme.workingHoursEnabled === true, theme.workingHours),
       eyeCatcher: typeof theme.eyeCatcher === "string" ? theme.eyeCatcher : "",
       eyeCatcherEnabled: theme.eyeCatcherEnabled === true,
+      eyeCatcherTheme: this.normalizeEyeCatcherTheme(theme.eyeCatcherTheme),
       inactivityEnabled: theme.inactivityEnabled === true,
       inactivityMessage:
         typeof theme.inactivityMessage === "string" && theme.inactivityMessage
@@ -1204,14 +1332,28 @@ export class WidgetsService {
   private async pickAgentForRouting(organizationId: string): Promise<string | null> {
     const members = await this.prisma.userOrganization.findMany({
       where: { organizationId, agentStatus: "ONLINE" },
-      select: { id: true }
+      select: { id: true, maxOpenChats: true }
     });
     if (!members.length) {
       return null;
     }
+
+    // Skip agents who are off shift according to the work scheduler.
+    const onShift = new Set(
+      await this.schedules.filterOnShift(
+        organizationId,
+        members.map((member) => member.id)
+      )
+    );
+    const available = members.filter((member) => onShift.has(member.id));
+    if (!available.length) {
+      return null;
+    }
+
     const counts = await Promise.all(
-      members.map(async (m) => ({
+      available.map(async (m) => ({
         id: m.id,
+        maxOpenChats: m.maxOpenChats,
         open: await this.prisma.conversation.count({
           where: {
             organizationId,
@@ -1223,8 +1365,14 @@ export class WidgetsService {
         })
       }))
     );
-    counts.sort((a, b) => a.open - b.open);
-    return counts[0]?.id ?? null;
+    // Respect each agent's own "max open chats" limit before load-balancing.
+    const withRoom = counts.filter((agent) => agent.open < agent.maxOpenChats);
+    if (!withRoom.length) {
+      return null;
+    }
+
+    withRoom.sort((a, b) => a.open - b.open);
+    return withRoom[0]?.id ?? null;
   }
 
   /** True if now (in the schedule's timezone) is within the weekly working hours. */
@@ -1283,6 +1431,8 @@ export class WidgetsService {
       departmentId: conversation.departmentId,
       assignedAgentId: conversation.assignedAgentId,
       source: conversation.source,
+      channel: conversation.channel,
+      channelThreadId: conversation.channelThreadId,
       status: conversation.status,
       priority: conversation.priority,
       subject: conversation.subject,
@@ -1322,6 +1472,11 @@ export class WidgetsService {
     const trimmedValue = value?.trim();
 
     return trimmedValue ? `web:${trimmedValue.slice(0, 187)}` : `web:${this.generateSessionToken()}`;
+  }
+
+  /** Card numbers pasted into chat are masked before they are ever stored. */
+  private safeBody(body: string): string {
+    return maskCardNumbers(this.trimBody(body));
   }
 
   private trimBody(value: string): string {
@@ -1452,6 +1607,7 @@ function buildWidgetScript(): string {
     '.lcw-msg{max-width:82%;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.lcw-agent{align-self:flex-start;background:#2f2f36;color:#fff;border-bottom-left-radius:5px}.lcw-visitor{align-self:flex-end;background:var(--lcw-accent,#ffd21e);color:#111;border-bottom-right-radius:5px}.lcw-system{align-self:center;background:transparent;color:#8a8a92;font-size:12px}' +
     '.lcw-greet{align-self:stretch;background:#2f2f36;border-radius:14px;padding:12px}.lcw-greet-emoji{background:#f3f4f6;border-radius:10px;text-align:center;font-size:36px;padding:16px}.lcw-greet-txt{font-size:13px;color:#e6e6ea;margin-top:10px}.lcw-quick{display:flex;gap:8px;margin-top:10px}.lcw-q{border:0;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer}.lcw-q1{background:var(--lcw-accent,#ffd21e);color:#111}.lcw-q2{background:#3a3a42;color:#dcdce2}' +
     '.lcw-form{display:flex;gap:8px;align-items:flex-end;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:18px;padding:10px 14px;font-size:13px;outline:none;background:#26262b;color:#fff;font-family:inherit;line-height:1.4;resize:none;max-height:96px;overflow-y:auto}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#ffd21e)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#ffd21e);border-radius:50%;background:transparent;color:var(--lcw-accent,#ffd21e);cursor:pointer;font-weight:900;font-size:16px}' +
+    '.lcw-attach{height:38px;width:38px;flex:none;border:1px solid #3a3a42;border-radius:50%;background:transparent;color:#8a8a92;cursor:pointer;font-size:15px}.lcw-attach:hover{color:#fff;border-color:var(--lcw-accent,#ffd21e)}.lcw-file{display:block;color:inherit;text-decoration:underline;word-break:break-all}.lcw-file-img{display:block;max-width:180px;border-radius:10px;margin-top:6px}' +
     '.lcw-launcher{height:60px;width:60px;border:0;border-radius:50%;background:var(--lcw-accent,#ff5a00);color:#fff;box-shadow:0 16px 40px rgba(0,0,0,.3);cursor:pointer;font-size:26px}.lcw-powered{font-size:10px;color:#6b6b72;text-align:center;padding:8px}' +
     '</style>' +
     '<div class="lcw-root">' +
@@ -1464,14 +1620,14 @@ function buildWidgetScript(): string {
             '<button class="lcw-letschat" type="button">Let’s chat ➤</button>' +
           '</div></div>' +
           '<div class="lcw-tabs"><button class="lcw-tab lcw-tab-home on" type="button"><b>\u{1F3E0}</b>Home</button><button class="lcw-tab lcw-tab-chat" type="button"><b>\u{1F4AC}</b>Chat</button></div>' +
-          '<div class="lcw-powered">Powered by Today Chat</div>' +
+          '<div class="lcw-powered">Powered by LiveChat</div>' +
         '</div>' +
         '<div class="lcw-chat">' +
           '<header class="lcw-chead"><button class="lcw-back lcw-icbtn" type="button" aria-label="Back">&#8592;</button><div style="flex:1"></div><button class="lcw-close lcw-icbtn" type="button" aria-label="Close">&#10005;</button></header>' +
           '<div class="lcw-abar"><div class="lcw-av"><span class="lcw-agent-ini">LC</span><span class="lcw-dot" style="border-color:#26262b"></span></div><div><div class="lcw-agent-name">Support</div><div class="lcw-agent-role">We reply in a few minutes</div></div></div>' +
           '<div class="lcw-messages"></div>' +
-          '<form class="lcw-form"><textarea class="lcw-input" autocomplete="off" rows="1" placeholder="Write a message..."></textarea><button class="lcw-send" type="submit">➤</button></form>' +
-          '<div class="lcw-powered">Powered by Today Chat</div>' +
+          '<form class="lcw-form"><input class="lcw-file-input" type="file" hidden /><button class="lcw-attach" type="button" aria-label="Attach a file">📎</button><textarea class="lcw-input" autocomplete="off" rows="1" placeholder="Write a message..."></textarea><button class="lcw-send" type="submit">➤</button></form>' +
+          '<div class="lcw-powered">Powered by LiveChat</div>' +
         '</div>' +
       '</section>' +
       '<button class="lcw-launcher" type="button" aria-label="Open chat">\u{1F4AC}</button>' +
@@ -1505,7 +1661,7 @@ function buildWidgetScript(): string {
   }
   function openPanel() {
     container.classList.add("lcw-open");
-    if (state.conversationId) { showChat(); } else { showHome(); }
+    if (state.conversationId) { showChat(); reportRead(); } else { showHome(); }
   }
 
   // Inactivity nudge: auto-post a message if the visitor goes quiet mid-chat.
@@ -1839,8 +1995,24 @@ function buildWidgetScript(): string {
     if (root.querySelector(".lcw-eye") || localStorage.getItem(storagePrefix + "eyeSeen")) return;
     var tip = document.createElement("div");
     tip.className = "lcw-eye";
-    tip.style.cssText = "position:absolute;bottom:74px;right:0;max-width:230px;background:#fff;color:#111;border-radius:14px;padding:12px 30px 12px 14px;font-size:13px;line-height:1.4;box-shadow:0 12px 34px rgba(0,0,0,.25);cursor:pointer";
+    // The look is picked in Settings; each one is a different teaser style, same behaviour.
+    var looks = {
+      bubble: "background:#fff;color:#111;border-radius:14px;padding:12px 30px 12px 14px;box-shadow:0 12px 34px rgba(0,0,0,.25)",
+      card: "background:#fff;color:#111;border-radius:12px;padding:14px 30px 14px 14px;border-left:4px solid var(--lcw-accent,#ff5a00);box-shadow:0 12px 34px rgba(0,0,0,.2)",
+      banner: "background:var(--lcw-accent,#ff5a00);color:#fff;border-radius:10px;padding:12px 30px 12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.25);font-weight:700",
+      pill: "background:#fff;color:#111;border-radius:999px;padding:10px 32px 10px 18px;box-shadow:0 10px 26px rgba(0,0,0,.2)",
+      dark: "background:#1f1f23;color:#fff;border-radius:14px;padding:12px 30px 12px 14px;box-shadow:0 12px 34px rgba(0,0,0,.35)",
+      avatar: "background:#fff;color:#111;border-radius:14px;padding:12px 30px 12px 46px;box-shadow:0 12px 34px rgba(0,0,0,.25)"
+    };
+    var look = looks[state.config.eyeCatcherTheme] || looks.bubble;
+    tip.style.cssText = "position:absolute;bottom:74px;right:0;max-width:240px;font-size:13px;line-height:1.4;cursor:pointer;" + look;
     tip.textContent = state.config.eyeCatcher;
+    if (state.config.eyeCatcherTheme === "avatar") {
+      var face = document.createElement("span");
+      face.textContent = "💬";
+      face.style.cssText = "position:absolute;left:10px;top:10px;width:26px;height:26px;border-radius:50%;background:var(--lcw-accent,#ff5a00);display:grid;place-items:center;font-size:14px";
+      tip.appendChild(face);
+    }
     var x = document.createElement("button");
     x.type = "button";
     x.textContent = "×";
@@ -2111,6 +2283,14 @@ function buildWidgetScript(): string {
   function renderMessage(message) {
     if (!message || state.renderedMessageIds[message.id]) return;
     state.renderedMessageIds[message.id] = true;
+    // Rich carousel: several cards the visitor can swipe through.
+    var carousel = message.metadata && message.metadata.carousel;
+    if (carousel && carousel.cards && carousel.cards.length) {
+      messages.appendChild(buildCarousel(carousel.cards));
+      messages.scrollTop = messages.scrollHeight;
+      if (message.senderType === "AGENT") { maybeShowRating(); }
+      return;
+    }
     var card = message.metadata && message.metadata.productCard;
     if (card && typeof card === "object") {
       messages.appendChild(buildProductCard(card));
@@ -2120,13 +2300,99 @@ function buildWidgetScript(): string {
     }
     var bubble = document.createElement("div");
     bubble.className = "lcw-msg " + (message.senderType === "VISITOR" ? "lcw-visitor" : "lcw-agent");
-    bubble.textContent = message.body || "Attachment";
+    var attachment = message.metadata && message.metadata.attachment;
+    if (attachment && attachment.url) {
+      var link = document.createElement("a");
+      link.className = "lcw-file";
+      link.href = String(attachment.url);
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "📎 " + String(attachment.fileName || "Attachment");
+      bubble.appendChild(link);
+      if (String(attachment.mimeType || "").indexOf("image/") === 0) {
+        var preview = document.createElement("img");
+        preview.className = "lcw-file-img";
+        preview.src = String(attachment.url);
+        preview.alt = String(attachment.fileName || "Attachment");
+        bubble.appendChild(preview);
+      }
+    } else {
+      bubble.textContent = message.body || "Attachment";
+    }
     messages.appendChild(bubble);
+    // Chatbot question: show its options as buttons; tapping one sends it as a normal reply.
+    var choices = message.metadata && message.metadata.choices;
+    if (choices && choices.length) { renderChoices(choices); }
     messages.scrollTop = messages.scrollHeight;
-    if (message.senderType === "AGENT") { maybeShowRating(); }
+    if (message.senderType === "AGENT") { maybeShowRating(); reportRead(); }
     // Any real message resets the quiet timer.
     state.inactivityShown = false;
     resetInactivityTimer();
+  }
+
+  // Chatbot flow: buttons under a question. Tapping one sends the label as the visitor's answer.
+  function renderChoices(choices) {
+    var old = root.querySelector(".lcw-choices");
+    if (old) old.remove();
+    var wrap = document.createElement("div");
+    wrap.className = "lcw-choices";
+    wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-self:flex-start;max-width:82%;margin-top:2px";
+    choices.slice(0, 10).forEach(function (label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = String(label);
+      b.style.cssText = "border:1px solid var(--lcw-accent,#ffd21e);background:transparent;color:inherit;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer";
+      b.addEventListener("click", function () { wrap.remove(); sendMessage(String(label)); });
+      wrap.appendChild(b);
+    });
+    messages.appendChild(wrap);
+  }
+
+  // A row of cards the visitor scrolls sideways — products, plans, articles.
+  function buildCarousel(cards) {
+    var rail = document.createElement("div");
+    rail.className = "lcw-carousel";
+    rail.style.cssText = "align-self:stretch;display:flex;gap:8px;overflow-x:auto;padding-bottom:4px";
+    cards.slice(0, 10).forEach(function (item) {
+      var card = document.createElement("div");
+      card.style.cssText = "flex:0 0 165px;background:#fff;color:#111;border:1px solid #e4e4e8;border-radius:12px;overflow:hidden";
+      if (item.image) {
+        var img = document.createElement("img");
+        img.src = String(item.image);
+        img.alt = String(item.title || "");
+        img.style.cssText = "width:100%;height:92px;object-fit:cover;display:block";
+        card.appendChild(img);
+      }
+      var pad = document.createElement("div");
+      pad.style.cssText = "padding:9px 10px";
+      var title = document.createElement("div");
+      title.textContent = String(item.title || "");
+      title.style.cssText = "font-size:12px;font-weight:700;line-height:1.3";
+      pad.appendChild(title);
+      if (item.subtitle) {
+        var sub = document.createElement("div");
+        sub.textContent = String(item.subtitle);
+        sub.style.cssText = "font-size:11px;color:#6b6b72;margin-top:3px;line-height:1.35";
+        pad.appendChild(sub);
+      }
+      if (item.buttonLabel) {
+        var btn = document.createElement(item.buttonUrl ? "a" : "button");
+        btn.textContent = String(item.buttonLabel);
+        btn.style.cssText = "display:block;margin-top:8px;text-align:center;border:0;border-radius:8px;padding:7px 8px;font-size:11px;font-weight:700;cursor:pointer;background:var(--lcw-accent,#ffd21e);color:#111;text-decoration:none";
+        if (item.buttonUrl) {
+          btn.href = String(item.buttonUrl);
+          btn.target = "_blank";
+          btn.rel = "noopener noreferrer";
+        } else {
+          btn.type = "button";
+          btn.addEventListener("click", function () { sendMessage(String(item.title || item.buttonLabel)); });
+        }
+        pad.appendChild(btn);
+      }
+      card.appendChild(pad);
+      rail.appendChild(card);
+    });
+    return rail;
   }
 
   // Ecommerce: render an agent-sent product recommendation as a rich card.
@@ -2217,6 +2483,60 @@ function buildWidgetScript(): string {
     bubble.textContent = text;
     messages.appendChild(bubble);
   }
+
+  // ---- visitor file upload ----
+  var fileInput = root.querySelector(".lcw-file-input");
+  var attachButton = root.querySelector(".lcw-attach");
+  if (attachButton && fileInput) {
+    attachButton.addEventListener("click", function () {
+      if (!state.conversationId) {
+        addSystem("Start the chat first, then you can send a file.");
+        return;
+      }
+      fileInput.click();
+    });
+    fileInput.addEventListener("change", function () {
+      var file = fileInput.files && fileInput.files[0];
+      fileInput.value = "";
+      if (!file || !state.conversationId || !state.sessionToken) return;
+      if (file.size > 10 * 1024 * 1024) {
+        addSystem("That file is larger than 10 MB.");
+        return;
+      }
+      var form = new FormData();
+      form.append("file", file);
+      form.append("sessionToken", state.sessionToken);
+      attachButton.disabled = true;
+      fetch(apiBase + "/widgets/public/" + encodeURIComponent(widgetKey) + "/conversations/" + encodeURIComponent(state.conversationId) + "/attachments", {
+        method: "POST",
+        body: form,
+        mode: "cors"
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("Upload failed");
+          return response.json();
+        })
+        .then(function (message) { renderMessage(message); })
+        .catch(function () { addSystem("The file could not be sent."); })
+        .then(function () { attachButton.disabled = false; });
+    });
+  }
+
+  // ---- read receipts: tell the agent their messages were seen ----
+  var readTimer = null;
+  function reportRead() {
+    if (!state.conversationId || !state.sessionToken) return;
+    if (!container.classList.contains("lcw-open") || document.visibilityState === "hidden") return;
+    if (readTimer) return;
+    readTimer = setTimeout(function () {
+      readTimer = null;
+      fetchJson("/widgets/public/" + encodeURIComponent(widgetKey) + "/conversations/" + encodeURIComponent(state.conversationId) + "/read", {
+        method: "POST",
+        body: { sessionToken: state.sessionToken }
+      }).catch(function () {});
+    }, 400);
+  }
+  document.addEventListener("visibilitychange", reportRead);
 
   function fetchJson(path, options) {
     options = options || {};

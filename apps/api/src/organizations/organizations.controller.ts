@@ -107,9 +107,10 @@ export class OrganizationsController {
   updateMember(
     @Param("organizationId") organizationId: string,
     @Param("membershipId") membershipId: string,
+    @CurrentOrganization() context: OrganizationRequestContext,
     @Body() dto: UpdateMemberDto
   ): Promise<OrganizationMemberDto> {
-    return this.organizationsService.updateMember(organizationId, membershipId, dto);
+    return this.organizationsService.updateMember(organizationId, membershipId, dto, context);
   }
 
   @Get(":organizationId/invitations")
@@ -135,10 +136,6 @@ export class OrganizationsController {
     @CurrentOrganization() context: OrganizationRequestContext,
     @Body() dto: CreateInvitationDto
   ): Promise<InvitationDto> {
-    return this.organizationsService.createInvitation(
-      organizationId,
-      context.membershipId,
-      dto
-    );
+    return this.organizationsService.createInvitation(organizationId, context, dto);
   }
 }

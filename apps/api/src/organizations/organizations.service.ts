@@ -6,7 +6,11 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import { Prisma, RoleKey, UserStatus } from "@prisma/client";
+import { ConfigService } from "@nestjs/config";
 import { OWNER_PERMISSIONS } from "../auth/auth.constants";
+import { EntitlementsService } from "../billing/entitlements.service";
+import { AuditService } from "../common/audit/audit.service";
+import { MailService } from "../mail/mail.service";
 import type { AuthUser } from "../auth/types/auth-user";
 import { PrismaService } from "../prisma/prisma.service";
 import type { OrganizationRequestContext } from "./types/organization-context";
@@ -21,11 +25,17 @@ import type {
 import type { UpdateMemberDto } from "./dto/update-member.dto";
 import type { UpdateOrganizationDto } from "./dto/update-organization.dto";
 
+const SERVER_CONTROLLED_METADATA_KEYS = ["addons", "provisionedBy"] as const;
+
 @Injectable()
 export class OrganizationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly accessService: OrganizationAccessService
+    private readonly accessService: OrganizationAccessService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
+    private readonly audit: AuditService,
+    private readonly entitlements: EntitlementsService
   ) {}
 
   async listForUser(user: AuthUser): Promise<OrganizationDto[]> {
@@ -68,8 +78,8 @@ export class OrganizationsService {
 
   /**
    * Reseller self-serve: provision a brand-new client firm owned by the current
-   * user, pre-configured with the Legal add-on enabled + legal firm mode on. Lets
-   * an agency spin up a law-firm tenant without contacting us.
+   * user with legal firm mode pre-configured. The paid Legal add-on is not granted
+   * here; it is enabled (and billed) from the firm's Billing screen.
    */
   async provisionClient(user: AuthUser, input: { name: string }): Promise<OrganizationDto> {
     const name = input.name.trim();
@@ -88,7 +98,6 @@ export class OrganizationsService {
           status: "TRIALING",
           trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
           metadata: {
-            addons: { legal: true },
             legalIntake: { enabled: true, firmName: name },
             provisionedBy: user.userId
           } as Prisma.InputJsonValue
@@ -218,7 +227,10 @@ export class OrganizationsService {
 
     const organization = await this.prisma.organization.update({
       where: { id: organizationId },
-      data: this.buildOrganizationUpdateData(dto)
+      data: this.buildOrganizationUpdateData(
+        dto,
+        await this.getServerControlledMetadata(organizationId)
+      )
     });
 
     return this.mapOrganization(organization);
@@ -273,7 +285,8 @@ export class OrganizationsService {
   async updateMember(
     organizationId: string,
     membershipId: string,
-    dto: UpdateMemberDto
+    dto: UpdateMemberDto,
+    context: OrganizationRequestContext
   ): Promise<OrganizationMemberDto> {
     const membership = await this.prisma.userOrganization.findFirst({
       where: {
@@ -286,6 +299,12 @@ export class OrganizationsService {
       throw new NotFoundException("Member not found");
     }
 
+    await this.accessService.assertCanManageMember(
+      context,
+      membershipId,
+      dto.status !== undefined && dto.status !== UserStatus.ACTIVE
+    );
+
     await this.prisma.userOrganization.update({
       where: { id: membershipId },
       data: {
@@ -296,6 +315,15 @@ export class OrganizationsService {
         ...(dto.agentStatus !== undefined ? { agentStatus: dto.agentStatus } : {}),
         ...(dto.maxOpenChats !== undefined ? { maxOpenChats: dto.maxOpenChats } : {})
       }
+    });
+
+    this.audit.record({
+      organizationId,
+      actorMemberId: context.membershipId,
+      action: "member.updated",
+      entityType: "membership",
+      entityId: membershipId,
+      payload: { ...dto }
     });
 
     const updatedMember = (await this.listMembers(organizationId)).find(
@@ -320,10 +348,14 @@ export class OrganizationsService {
 
   async createInvitation(
     organizationId: string,
-    invitedById: string,
+    context: OrganizationRequestContext,
     dto: CreateInvitationDto
   ): Promise<InvitationDto> {
     const email = dto.email.trim().toLowerCase();
+    const invitedById = context.membershipId;
+
+    // Flat plans include a fixed number of agents.
+    await this.entitlements.assertCanAddAgent(organizationId);
 
     if (dto.roleId) {
       const role = await this.prisma.role.findFirst({
@@ -336,6 +368,8 @@ export class OrganizationsService {
       if (!role) {
         throw new BadRequestException("Role does not belong to this organization");
       }
+
+      this.accessService.assertCanGrantRole(context, role);
     }
 
     const existingInvitation = await this.prisma.invitation.findFirst({
@@ -381,8 +415,18 @@ export class OrganizationsService {
       }
     });
 
-    // Surface the raw token once so the caller can build a shareable invite link.
-    return { ...this.mapInvitation(invitation), token };
+    const emailSent = await this.sendInvitationEmail(organizationId, context.membershipId, email, token);
+    this.audit.record({
+      organizationId,
+      actorMemberId: context.membershipId,
+      action: "member.invited",
+      entityType: "invitation",
+      entityId: invitation.id,
+      payload: { email, emailSent }
+    });
+
+    // Surface the raw token once so the caller can also share the invite link directly.
+    return { ...this.mapInvitation(invitation), token, emailSent };
   }
 
   private async getOrganizationOrThrow(organizationId: string) {
@@ -526,8 +570,67 @@ export class OrganizationsService {
     return createHash("sha256").update(token).digest("hex");
   }
 
+  /** Email the invite link. Returns false when SMTP isn't configured or sending fails. */
+  private async sendInvitationEmail(
+    organizationId: string,
+    inviterMembershipId: string,
+    email: string,
+    token: string
+  ): Promise<boolean> {
+    const [organization, inviterMembership] = await Promise.all([
+      this.prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+      this.prisma.userOrganization.findUnique({
+        where: { id: inviterMembershipId },
+        select: { displayName: true, userId: true }
+      })
+    ]);
+    const inviter = inviterMembership
+      ? await this.prisma.user.findUnique({
+          where: { id: inviterMembership.userId },
+          select: { name: true, email: true }
+        })
+      : null;
+
+    const organizationName = organization?.name ?? "a LiveChat workspace";
+    const inviterName = inviter?.name ?? inviterMembership?.displayName ?? inviter?.email ?? "A teammate";
+    const appUrl = (this.config.get<string>("APP_URL") ?? "http://localhost:3000").replace(/\/$/, "");
+    const link = `${appUrl}/invite/${encodeURIComponent(token)}`;
+    const escape = (value: string) =>
+      value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+    return this.mail.send({
+      to: email,
+      subject: `${inviterName} invited you to join ${organizationName}`,
+      text:
+        `${inviterName} invited you to join ${organizationName} on LiveChat as an agent.\n\n` +
+        `Accept the invitation and create your account:\n${link}\n\n` +
+        "This link expires in 7 days. If you weren't expecting it, you can ignore this email.",
+      html:
+        `<p><b>${escape(inviterName)}</b> invited you to join <b>${escape(organizationName)}</b> on LiveChat as an agent.</p>` +
+        `<p><a href="${escape(link)}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Accept invitation</a></p>` +
+        `<p style="color:#666;font-size:12px">Or open this link: ${escape(link)}<br>It expires in 7 days. If you weren't expecting it, you can ignore this email.</p>`
+    });
+  }
+
+  /** Metadata keys only billing/provisioning may write (the dashboard sends metadata back whole). */
+  private async getServerControlledMetadata(organizationId: string): Promise<Record<string, unknown>> {
+    const current = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { metadata: true }
+    });
+    const metadata =
+      current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+        ? (current.metadata as Record<string, unknown>)
+        : {};
+
+    return Object.fromEntries(
+      SERVER_CONTROLLED_METADATA_KEYS.filter((key) => key in metadata).map((key) => [key, metadata[key]])
+    );
+  }
+
   private buildOrganizationUpdateData(
-    dto: UpdateOrganizationDto
+    dto: UpdateOrganizationDto,
+    serverControlledMetadata: Record<string, unknown>
   ): Prisma.OrganizationUpdateInput {
     const data: Prisma.OrganizationUpdateInput = {};
 
@@ -540,7 +643,12 @@ export class OrganizationsService {
     }
 
     if (dto.metadata !== undefined) {
-      data.metadata = dto.metadata as Prisma.InputJsonValue;
+      const clientMetadata = Object.fromEntries(
+        Object.entries(dto.metadata).filter(
+          ([key]) => !(SERVER_CONTROLLED_METADATA_KEYS as readonly string[]).includes(key)
+        )
+      );
+      data.metadata = { ...clientMetadata, ...serverControlledMetadata } as Prisma.InputJsonValue;
     }
 
     return data;

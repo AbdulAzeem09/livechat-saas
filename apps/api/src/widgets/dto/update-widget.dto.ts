@@ -179,6 +179,15 @@ export class UpdateWidgetDto {
   @IsBoolean()
   eyeCatcherEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    description: "Look of the teaser bubble",
+    enum: ["bubble", "card", "banner", "pill", "dark", "avatar"]
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  eyeCatcherTheme?: string;
+
   @ApiPropertyOptional({ description: "Slack Incoming Webhook URL to notify on new chats" })
   @IsOptional()
   @IsString()

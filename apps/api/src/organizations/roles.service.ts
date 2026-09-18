@@ -4,12 +4,15 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
+import { RoleKey } from "@prisma/client";
 import { AVAILABLE_PERMISSIONS } from "../auth/auth.constants";
+import { AuditService } from "../common/audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { OrganizationAccessService } from "./organization-access.service";
 import type { CreateRoleDto } from "./dto/create-role.dto";
 import type { RoleAssignmentDto, RoleDto } from "./dto/role-response.dto";
 import type { UpdateRoleDto } from "./dto/update-role.dto";
+import type { OrganizationRequestContext } from "./types/organization-context";
 
 @Injectable()
 export class RolesService {
@@ -17,7 +20,8 @@ export class RolesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly accessService: OrganizationAccessService
+    private readonly accessService: OrganizationAccessService,
+    private readonly audit: AuditService
   ) {}
 
   async listRoles(organizationId: string): Promise<RoleDto[]> {
@@ -29,8 +33,13 @@ export class RolesService {
     return roles.map((role) => this.mapRole(role));
   }
 
-  async createRole(organizationId: string, dto: CreateRoleDto): Promise<RoleDto> {
+  async createRole(
+    organizationId: string,
+    dto: CreateRoleDto,
+    context: OrganizationRequestContext
+  ): Promise<RoleDto> {
     this.validatePermissions(dto.permissions);
+    this.accessService.assertCanGrantPermissions(context, dto.permissions);
 
     const existing = await this.prisma.role.findFirst({
       where: {
@@ -59,7 +68,8 @@ export class RolesService {
   async updateRole(
     organizationId: string,
     roleId: string,
-    dto: UpdateRoleDto
+    dto: UpdateRoleDto,
+    context: OrganizationRequestContext
   ): Promise<RoleDto> {
     const role = await this.getRoleOrThrow(organizationId, roleId);
 
@@ -69,6 +79,7 @@ export class RolesService {
 
     if (dto.permissions) {
       this.validatePermissions(dto.permissions);
+      this.accessService.assertCanGrantPermissions(context, dto.permissions);
     }
 
     if (dto.name && dto.name !== role.name) {
@@ -114,10 +125,13 @@ export class RolesService {
   async assignRole(
     organizationId: string,
     membershipId: string,
-    roleId: string
+    roleId: string,
+    context: OrganizationRequestContext
   ): Promise<RoleAssignmentDto> {
     await this.getMembershipOrThrow(organizationId, membershipId);
-    await this.getRoleOrThrow(organizationId, roleId);
+    const role = await this.getRoleOrThrow(organizationId, roleId);
+    this.accessService.assertCanGrantRole(context, role);
+    await this.accessService.assertCanManageMember(context, membershipId, false);
 
     const existingAssignment = await this.prisma.userRole.findFirst({
       where: {
@@ -137,16 +151,32 @@ export class RolesService {
       });
     }
 
+    this.audit.record({
+      organizationId,
+      actorMemberId: context.membershipId,
+      action: "role.assigned",
+      entityType: "membership",
+      entityId: membershipId,
+      payload: { roleId, roleName: role.name }
+    });
+
     return this.getRoleAssignment(organizationId, membershipId, roleId);
   }
 
   async revokeRole(
     organizationId: string,
     membershipId: string,
-    roleId: string
+    roleId: string,
+    context: OrganizationRequestContext
   ): Promise<RoleAssignmentDto> {
     await this.getMembershipOrThrow(organizationId, membershipId);
-    await this.getRoleOrThrow(organizationId, roleId);
+    const role = await this.getRoleOrThrow(organizationId, roleId);
+    this.accessService.assertCanGrantRole(context, role);
+    await this.accessService.assertCanManageMember(
+      context,
+      membershipId,
+      role.key === RoleKey.OWNER
+    );
 
     await this.prisma.userRole.deleteMany({
       where: {
@@ -154,6 +184,14 @@ export class RolesService {
         membershipId,
         roleId
       }
+    });
+    this.audit.record({
+      organizationId,
+      actorMemberId: context.membershipId,
+      action: "role.revoked",
+      entityType: "membership",
+      entityId: membershipId,
+      payload: { roleId, roleName: role.name }
     });
 
     return this.getRoleAssignment(organizationId, membershipId, roleId);

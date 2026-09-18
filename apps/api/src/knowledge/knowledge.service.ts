@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { KnowledgeArticle } from "@prisma/client";
+import {
+  assertPublicHttpUrl,
+  readTextWithLimit,
+  safeFetch,
+  UnsafeUrlError
+} from "../common/network/safe-fetch";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateKnowledgeDto } from "./dto/create-knowledge.dto";
 import { KnowledgeArticleDto } from "./dto/knowledge-response.dto";
@@ -7,6 +13,8 @@ import { UpdateKnowledgeDto } from "./dto/update-knowledge.dto";
 
 /** Max characters of extracted text we keep per imported source. */
 const MAX_SOURCE_CHARS = 18000;
+/** Max bytes downloaded when importing a web page. */
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
 @Injectable()
 export class KnowledgeService {
@@ -78,14 +86,12 @@ export class KnowledgeService {
    * published knowledge article the AI receptionist can answer from.
    */
   async importWebsite(organizationId: string, url: string): Promise<KnowledgeArticleDto> {
-    const target = this.assertSafeUrl(url);
-
+    let target: URL;
     let html: string;
     try {
-      const response = await fetch(target.toString(), {
-        signal: AbortSignal.timeout(10000),
-        headers: { "user-agent": "LiveChatBot/1.0 (+knowledge-import)" },
-        redirect: "follow"
+      target = await assertPublicHttpUrl(url);
+      const response = await safeFetch(target.toString(), {
+        headers: { "user-agent": "LiveChatBot/1.0 (+knowledge-import)" }
       });
       if (!response.ok) {
         throw new Error(`status ${response.status}`);
@@ -94,10 +100,13 @@ export class KnowledgeService {
       if (!/text\/html|text\/plain|application\/xhtml/i.test(contentType)) {
         throw new BadRequestException("That URL is not an HTML page.");
       }
-      html = await response.text();
+      html = await readTextWithLimit(response, MAX_PAGE_BYTES);
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
+      }
+      if (error instanceof UnsafeUrlError) {
+        throw new BadRequestException(error.message);
       }
       throw new BadRequestException("Could not fetch that URL. Check it is public and reachable.");
     }
@@ -175,35 +184,6 @@ export class KnowledgeService {
       throw new NotFoundException("Article not found");
     }
     return article;
-  }
-
-  /** Reject non-http(s) URLs and obvious internal/loopback targets (basic SSRF guard). */
-  private assertSafeUrl(url: string): URL {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new BadRequestException("That is not a valid URL.");
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new BadRequestException("Only http and https URLs are supported.");
-    }
-    const host = parsed.hostname.toLowerCase();
-    const blocked =
-      host === "localhost" ||
-      host === "0.0.0.0" ||
-      host === "::1" ||
-      host.endsWith(".localhost") ||
-      host.endsWith(".internal") ||
-      /^127\./.test(host) ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^169\.254\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-    if (blocked) {
-      throw new BadRequestException("That URL points to a private/internal address.");
-    }
-    return parsed;
   }
 
   /** Pull the <title> from raw HTML. */

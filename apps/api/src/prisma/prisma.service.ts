@@ -2,6 +2,33 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/commo
 import { ConfigService } from "@nestjs/config";
 import { PrismaClient } from "@prisma/client";
 
+/**
+ * Supabase's transaction pooler (port 6543, PgBouncer/Supavisor) doesn't support prepared
+ * statements. Without `pgbouncer=true` Prisma intermittently fails with
+ * "prepared statement ... already exists". Migrations must use the direct (5432) URL.
+ */
+export function withPoolerParams(databaseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+
+  const isTransactionPooler = url.port === "6543" || url.hostname.includes(".pooler.supabase.com");
+  if (!isTransactionPooler || url.port === "5432") {
+    return databaseUrl;
+  }
+
+  if (!url.searchParams.has("pgbouncer")) {
+    url.searchParams.set("pgbouncer", "true");
+  }
+  if (!url.searchParams.has("connection_limit")) {
+    url.searchParams.set("connection_limit", "5");
+  }
+  return url.toString();
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
@@ -10,7 +37,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     super({
       datasources: {
         db: {
-          url: config.getOrThrow<string>("DATABASE_URL")
+          url: withPoolerParams(config.getOrThrow<string>("DATABASE_URL"))
         }
       },
       // Default interactive-transaction timeout is 5s, which a remote

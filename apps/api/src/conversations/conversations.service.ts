@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
@@ -18,6 +20,8 @@ import {
   UserStatus
 } from "@prisma/client";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
+import { ChannelsService } from "../channels/channels.service";
+import { maskCardNumbers } from "../common/text/mask-sensitive";
 import { PrismaService } from "../prisma/prisma.service";
 import { FileStorageService, type UploadedFileLike } from "../storage/file-storage.service";
 import type { AssignConversationDto } from "./dto/assign-conversation.dto";
@@ -27,14 +31,20 @@ import type { ListConversationsQuery } from "./dto/list-conversations.query";
 import type { ListMessagesQuery } from "./dto/list-messages.query";
 import type { SendMessageDto } from "./dto/send-message.dto";
 import type { UpdateConversationDto } from "./dto/update-conversation.dto";
+import { ConversationInsightsService } from "../ai/conversation-insights.service";
+import { IntegrationHubService, type CommerceOrder } from "../apps/integration-hub.service";
 import { ConversationsGateway } from "./conversations.gateway";
 
 @Injectable()
 export class ConversationsService {
   constructor(
+    @Inject(forwardRef(() => ChannelsService))
+    private readonly channels: ChannelsService,
     private readonly prisma: PrismaService,
     private readonly gateway: ConversationsGateway,
-    private readonly fileStorage: FileStorageService
+    private readonly fileStorage: FileStorageService,
+    private readonly insights: ConversationInsightsService,
+    private readonly integrations: IntegrationHubService
   ) {}
 
   async listConversations(
@@ -178,6 +188,74 @@ export class ConversationsService {
     return response;
   }
 
+  /**
+   * The customer's recent orders from the connected shop. Empty when Shopify isn't
+   * installed or the customer has no email on file.
+   */
+  async recentOrders(organizationId: string, conversationId: string): Promise<CommerceOrder[]> {
+    const conversation = await this.getConversationOrThrow(organizationId, conversationId);
+    const [contact, visitor] = await Promise.all([
+      conversation.contactId
+        ? this.prisma.contact.findUnique({ where: { id: conversation.contactId } })
+        : null,
+      conversation.visitorId
+        ? this.prisma.visitor.findUnique({ where: { id: conversation.visitorId } })
+        : null
+    ]);
+    const email = contact?.email ?? visitor?.email ?? "";
+
+    return email ? this.integrations.recentOrders(organizationId, email) : [];
+  }
+
+  /** Push the customer into HubSpot once the chat is done. */
+  private syncContactWhenFinished(
+    organizationId: string,
+    conversationId: string,
+    status: ConversationStatus | undefined
+  ): void {
+    if (status !== ConversationStatus.RESOLVED && status !== ConversationStatus.CLOSED) {
+      return;
+    }
+
+    void (async () => {
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { id: conversationId, organizationId },
+        select: { contactId: true, visitorId: true }
+      });
+      const contact = conversation?.contactId
+        ? await this.prisma.contact.findUnique({ where: { id: conversation.contactId } })
+        : null;
+      const visitor = conversation?.visitorId
+        ? await this.prisma.visitor.findUnique({ where: { id: conversation.visitorId } })
+        : null;
+      const email = contact?.email ?? visitor?.email;
+
+      if (!email) {
+        return;
+      }
+
+      await this.integrations.syncContactToHubspot(organizationId, {
+        email,
+        name: contact?.name ?? visitor?.name ?? null,
+        phone: contact?.phone ?? visitor?.phone ?? null,
+        company: contact?.company ?? null
+      });
+    })().catch(() => undefined);
+  }
+
+  /** Label a finished chat by topic so Archives and the tag report stay useful. */
+  private autoTagWhenFinished(
+    organizationId: string,
+    conversationId: string,
+    status: ConversationStatus | undefined
+  ): void {
+    if (status !== ConversationStatus.RESOLVED && status !== ConversationStatus.CLOSED) {
+      return;
+    }
+
+    void this.insights.tag(organizationId, conversationId, { apply: true }).catch(() => undefined);
+  }
+
   async updateConversation(
     organizationId: string,
     conversationId: string,
@@ -200,6 +278,8 @@ export class ConversationsService {
     });
     const response = this.mapConversation(conversation);
 
+    this.autoTagWhenFinished(organizationId, conversationId, dto.status);
+    this.syncContactWhenFinished(organizationId, conversationId, dto.status);
     this.gateway.emitConversationUpdated(response);
     return response;
   }
@@ -331,6 +411,66 @@ export class ConversationsService {
     return messages.reverse().map((message) => this.mapMessage(message));
   }
 
+  /**
+   * Mark the other side's messages as read. Called when an agent opens a conversation and
+   * when the visitor's widget is on screen, so both sides can show delivered/read ticks.
+   */
+  async markRead(
+    organizationId: string,
+    conversationId: string,
+    reader: "AGENT" | "VISITOR",
+    participant: { membershipId?: string; visitorId?: string }
+  ): Promise<{ readAt: Date; messageIds: string[] }> {
+    const readAt = new Date();
+    // An agent reads what the visitor sent, and vice versa.
+    const senderType = reader === "AGENT" ? ParticipantType.VISITOR : ParticipantType.AGENT;
+    const unread = await this.prisma.message.findMany({
+      where: {
+        organizationId,
+        conversationId,
+        senderType,
+        visibility: MessageVisibility.PUBLIC,
+        deletedAt: null,
+        status: { not: MessageStatus.READ }
+      },
+      select: { id: true }
+    });
+    const messageIds = unread.map((message) => message.id);
+
+    if (messageIds.length) {
+      await this.prisma.message.updateMany({
+        where: { id: { in: messageIds } },
+        data: { status: MessageStatus.READ }
+      });
+    }
+
+    const where = {
+      organizationId,
+      conversationId,
+      ...(participant.membershipId
+        ? { membershipId: participant.membershipId }
+        : participant.visitorId
+          ? { visitorId: participant.visitorId }
+          : {})
+    };
+    const existing = participant.membershipId || participant.visitorId
+      ? await this.prisma.conversationParticipant.findFirst({ where })
+      : null;
+
+    if (existing) {
+      await this.prisma.conversationParticipant.update({
+        where: { id: existing.id },
+        data: { lastReadAt: readAt }
+      });
+    }
+
+    if (messageIds.length) {
+      this.gateway.emitMessagesRead({ organizationId, conversationId, reader, readAt, messageIds });
+    }
+
+    return { readAt, messageIds };
+  }
+
   async sendMessage(
     organizationId: string,
     conversationId: string,
@@ -338,7 +478,8 @@ export class ConversationsService {
     dto: SendMessageDto
   ): Promise<MessageDto> {
     const conversation = await this.getConversationOrThrow(organizationId, conversationId);
-    const body = dto.body.trim();
+    // Agents paste card numbers too; mask before anything is written to the database.
+    const body = maskCardNumbers(dto.body.trim());
 
     if (!body) {
       throw new BadRequestException("Message body cannot be empty");
@@ -388,6 +529,25 @@ export class ConversationsService {
 
     this.gateway.emitMessageCreated(messageResponse);
     this.gateway.emitConversationUpdated(this.mapConversation(result.conversation, result.message));
+
+    // WhatsApp / Messenger / Instagram / email chats: deliver the reply back to the customer.
+    if (
+      conversation.channel &&
+      conversation.channelThreadId &&
+      (dto.visibility ?? MessageVisibility.PUBLIC) === MessageVisibility.PUBLIC
+    ) {
+      void this.channels
+        .sendOutbound({
+          organizationId,
+          channel: conversation.channel,
+          threadId: conversation.channelThreadId,
+          body,
+          conversationId: conversation.id,
+          messageId: result.message.id
+        })
+        .catch(() => {});
+    }
+
     return messageResponse;
   }
 
@@ -397,6 +557,10 @@ export class ConversationsService {
     context: OrganizationRequestContext,
     file: UploadedFileLike
   ): Promise<MessageDto> {
+    if (!file.size || !file.buffer?.length) {
+      throw new BadRequestException("The uploaded file is empty");
+    }
+
     const conversation = await this.getConversationOrThrow(organizationId, conversationId);
     const stored = await this.fileStorage.save(organizationId, file);
 
@@ -607,6 +771,8 @@ export class ConversationsService {
       departmentId: conversation.departmentId,
       assignedAgentId: conversation.assignedAgentId,
       source: conversation.source,
+      channel: conversation.channel,
+      channelThreadId: conversation.channelThreadId,
       status: conversation.status,
       priority: conversation.priority,
       subject: conversation.subject,

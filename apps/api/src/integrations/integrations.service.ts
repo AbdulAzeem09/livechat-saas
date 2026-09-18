@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ApiKey, WebhookEndpoint } from "@prisma/client";
+import { assertPublicHttpUrl, safeFetch, UnsafeUrlError } from "../common/network/safe-fetch";
 import { PrismaService } from "../prisma/prisma.service";
 import { ApiKeyDto, CreatedApiKeyDto } from "./dto/api-key-response.dto";
 import { CreateApiKeyDto } from "./dto/create-api-key.dto";
@@ -75,6 +76,14 @@ export class IntegrationsService {
     organizationId: string,
     dto: CreateWebhookDto
   ): Promise<CreatedWebhookDto> {
+    try {
+      await assertPublicHttpUrl(dto.url.trim());
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof UnsafeUrlError ? error.message : "That webhook URL is not reachable."
+      );
+    }
+
     const secret = `whsec_${randomBytes(24).toString("base64url")}`;
 
     const hook = await this.prisma.webhookEndpoint.create({
@@ -120,7 +129,8 @@ export class IntegrationsService {
     await Promise.all(
       targets.map(async (hook) => {
         try {
-          const response = await fetch(hook.url, {
+          const response = await safeFetch(hook.url, {
+            maxRedirects: 0,
             method: "POST",
             headers: { "content-type": "application/json", "x-livechat-event": event },
             body: JSON.stringify({ event, organizationId, data: payload, sentAt: new Date().toISOString() })

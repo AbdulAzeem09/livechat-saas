@@ -6,6 +6,7 @@ import {
   MessageStatus,
   MessageType,
   MessageVisibility,
+  MessagingChannel,
   ParticipantType
 } from "@prisma/client";
 
@@ -80,6 +81,12 @@ export class ConversationDto {
 
   @ApiProperty({ enum: ConversationSource })
   source!: ConversationSource;
+
+  @ApiProperty({ enum: MessagingChannel, nullable: true, description: "Set for WhatsApp/Messenger/Instagram chats" })
+  channel!: MessagingChannel | null;
+
+  @ApiProperty({ nullable: true, description: "The customer's id on that channel" })
+  channelThreadId!: string | null;
 
   @ApiProperty({ enum: ConversationStatus })
   status!: ConversationStatus;

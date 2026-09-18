@@ -10,6 +10,10 @@ import {
 } from "@prisma/client";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
 import { PrismaService } from "../prisma/prisma.service";
+import { ConversationInsightsService } from "../ai/conversation-insights.service";
+import { IntegrationHubService } from "../apps/integration-hub.service";
+import { ChannelsService } from "../channels/channels.service";
+import { FileStorageService } from "../storage/file-storage.service";
 import { ConversationsGateway } from "./conversations.gateway";
 import { ConversationsService } from "./conversations.service";
 
@@ -160,6 +164,25 @@ describe(ConversationsService.name, () => {
         {
           provide: ConversationsGateway,
           useValue: gateway
+        },
+        {
+          provide: FileStorageService,
+          useValue: { save: jest.fn() }
+        },
+        {
+          provide: ChannelsService,
+          useValue: { sendOutbound: jest.fn() }
+        },
+        {
+          provide: ConversationInsightsService,
+          useValue: { tag: jest.fn().mockResolvedValue({ tags: [], applied: [], usedAI: false }) }
+        },
+        {
+          provide: IntegrationHubService,
+          useValue: {
+            recentOrders: jest.fn().mockResolvedValue([]),
+            syncContactToHubspot: jest.fn().mockResolvedValue(false)
+          }
         }
       ]
     }).compile();

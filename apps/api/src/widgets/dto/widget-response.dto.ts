@@ -82,6 +82,9 @@ export class PublicWidgetConfigDto {
   @ApiProperty({ description: "Whether to show the eye-catcher teaser" })
   eyeCatcherEnabled!: boolean;
 
+  @ApiProperty({ description: "Look of the teaser bubble" })
+  eyeCatcherTheme!: string;
+
   @ApiProperty({ description: "Whether to auto-nudge inactive visitors" })
   inactivityEnabled!: boolean;
 
@@ -153,6 +156,9 @@ export class WidgetInstallDto {
 
   @ApiProperty({ description: "Whether the eye-catcher teaser is on" })
   eyeCatcherEnabled!: boolean;
+
+  @ApiProperty({ description: "Look of the teaser bubble" })
+  eyeCatcherTheme!: string;
 
   @ApiProperty({ description: "Slack Incoming Webhook URL (empty = off)" })
   slackWebhookUrl!: string;

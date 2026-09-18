@@ -3,12 +3,13 @@ import { AuthModule } from "../auth/auth.module";
 import { OrganizationsModule } from "../organizations/organizations.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { AuthorizeNetService } from "./authorizenet.service";
-import { BillingController } from "./billing.controller";
+import { BillingController, BillingWebhooksController } from "./billing.controller";
 import { BillingService } from "./billing.service";
+import { EntitlementsModule } from "./entitlements.module";
 
 @Module({
-  imports: [AuthModule, OrganizationsModule, PrismaModule],
-  controllers: [BillingController],
+  imports: [AuthModule, EntitlementsModule, OrganizationsModule, PrismaModule],
+  controllers: [BillingController, BillingWebhooksController],
   providers: [BillingService, AuthorizeNetService],
   exports: [BillingService]
 })

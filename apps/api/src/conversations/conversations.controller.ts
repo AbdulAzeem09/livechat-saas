@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -36,6 +38,7 @@ import { ListMessagesQuery } from "./dto/list-messages.query";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { UpdateConversationDto } from "./dto/update-conversation.dto";
 import { UpdateTagsDto } from "./dto/update-tags.dto";
+import type { CommerceOrder } from "../apps/integration-hub.service";
 import { ConversationsService } from "./conversations.service";
 
 @ApiTags("Conversations")
@@ -130,6 +133,34 @@ export class ConversationsController {
     @Body() dto: UpdateTagsDto
   ): Promise<ConversationDto> {
     return this.conversationsService.updateTags(organizationId, conversationId, dto.tags);
+  }
+
+  @Get(":conversationId/orders")
+  @Permissions("chat:read")
+  @ApiOperation({ summary: "The customer's recent shop orders (needs the Shopify app)" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  recentOrders(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string
+  ): Promise<CommerceOrder[]> {
+    return this.conversationsService.recentOrders(organizationId, conversationId);
+  }
+
+  @Post(":conversationId/read")
+  @Permissions("chat:read")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Mark the visitor's messages in this conversation as read" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  async markRead(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string,
+    @CurrentOrganization() context: OrganizationRequestContext
+  ): Promise<{ readAt: Date; messageIds: string[] }> {
+    return this.conversationsService.markRead(organizationId, conversationId, "AGENT", {
+      membershipId: context.membershipId
+    });
   }
 
   @Post(":conversationId/attachments")

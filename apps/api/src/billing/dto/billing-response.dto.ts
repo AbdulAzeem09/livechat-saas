@@ -143,4 +143,16 @@ export class BillingOverviewDto {
     description: "Public Accept.js config for card tokenization (null in mock mode)"
   })
   acceptJs!: { apiLoginId: string; clientKey: string; environment: string } | null;
+
+  @ApiProperty({
+    description: "Whether the widget is allowed to serve visitors right now, and why not"
+  })
+  entitlements!: {
+    active: boolean;
+    reason: string | null;
+    message: string | null;
+    planCode: string;
+    agentLimit: number | null;
+    trialEndsAt: Date | null;
+  };
 }

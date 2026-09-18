@@ -4,10 +4,15 @@ import {
   Delete,
   Get,
   Header,
+  Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
+  Req,
   Res,
-  UseGuards
+  UseGuards,
+  type RawBodyRequest
 } from "@nestjs/common";
 import {
   ApiBearerAuth,
@@ -16,7 +21,7 @@ import {
   ApiParam,
   ApiTags
 } from "@nestjs/swagger";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "../auth/guards/permissions.guard";
@@ -117,5 +122,21 @@ export class BillingController {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Length", buffer.length);
     res.end(buffer);
+  }
+}
+
+@ApiTags("Billing")
+@Controller("billing/webhooks")
+export class BillingWebhooksController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Post("authorizenet")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Authorize.net webhook (signed with AUTHORIZENET_SIGNATURE_KEY)" })
+  authorizeNet(
+    @Req() request: RawBodyRequest<Request>,
+    @Headers("x-anet-signature") signature: string | undefined
+  ): Promise<{ received: true }> {
+    return this.billingService.handleAuthorizeNetWebhook(request.rawBody, signature);
   }
 }

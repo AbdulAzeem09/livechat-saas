@@ -1,27 +1,39 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Header,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
   Query,
   Req,
-  UseGuards
+  UploadedFile,
+  UseGuards,
+  UseInterceptors
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags
 } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import type { Request } from "express";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "../auth/guards/permissions.guard";
+import { resolveClientIp } from "../common/http/client-ip";
+import type { UploadedFileLike } from "../storage/file-storage.service";
+import { RATE_LIMITS } from "../common/http/client-ip-throttler.guard";
 import { MessageDto } from "../conversations/dto/conversation-response.dto";
 import { CurrentOrganization } from "../organizations/decorators/current-organization.decorator";
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
@@ -33,6 +45,8 @@ import { RecordSaleDto } from "./dto/record-sale.dto";
 import { SendWidgetMessageDto } from "./dto/send-widget-message.dto";
 import { StartWidgetSessionDto } from "./dto/start-widget-session.dto";
 import { WidgetHeartbeatDto } from "./dto/widget-heartbeat.dto";
+import { WidgetReadDto } from "./dto/widget-read.dto";
+import { CreateWidgetDto } from "./dto/create-widget.dto";
 import { UpdateWidgetDto } from "./dto/update-widget.dto";
 import {
   PublicWidgetConfigDto,
@@ -68,30 +82,8 @@ export class WidgetsController {
     return this.widgetsService.getPublicConfig(publicKey, this.getMetadata(request));
   }
 
-  @Get("widgets/public/:publicKey/legal-debug")
-  @Header("access-control-allow-origin", "*")
-  @ApiOperation({ summary: "TEMPORARY: diagnose legal/AI config for a widget's org" })
-  @ApiParam({ name: "publicKey" })
-  getLegalDebug(@Param("publicKey") publicKey: string): Promise<Record<string, unknown>> {
-    return this.widgetsService.getLegalDebug(publicKey);
-  }
-
-  @Get("widgets/public/ai-ping")
-  @Header("access-control-allow-origin", "*")
-  @ApiOperation({ summary: "TEMPORARY: prove the Anthropic API key + model actually work" })
-  getAiPing(): Promise<Record<string, unknown>> {
-    return this.widgetsService.getAiPing();
-  }
-
-  @Get("widgets/public/:publicKey/messages-debug")
-  @Header("access-control-allow-origin", "*")
-  @ApiOperation({ summary: "TEMPORARY: dump the latest conversation's messages for a widget's org" })
-  @ApiParam({ name: "publicKey" })
-  getMessagesDebug(@Param("publicKey") publicKey: string): Promise<Record<string, unknown>> {
-    return this.widgetsService.getMessagesDebug(publicKey);
-  }
-
   @Post("widgets/public/:publicKey/sessions")
+  @Throttle({ default: RATE_LIMITS.widgetSession })
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Start a public visitor session for a widget" })
   @ApiParam({ name: "publicKey" })
@@ -105,6 +97,7 @@ export class WidgetsController {
   }
 
   @Post("widgets/public/:publicKey/conversations")
+  @Throttle({ default: RATE_LIMITS.widgetConversation })
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Create a conversation from a public visitor widget" })
   @ApiParam({ name: "publicKey" })
@@ -201,6 +194,7 @@ export class WidgetsController {
   }
 
   @Post("widgets/public/:publicKey/conversations/:conversationId/menu-reply")
+  @Throttle({ default: RATE_LIMITS.widgetMessage })
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Post the bot reply for a tapped chatbot quick-reply option" })
   @ApiParam({ name: "publicKey" })
@@ -219,7 +213,57 @@ export class WidgetsController {
     );
   }
 
+  @Post("widgets/public/:publicKey/conversations/:conversationId/read")
+  @Throttle({ default: RATE_LIMITS.widgetMessage })
+  @Header("access-control-allow-origin", "*")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Visitor read receipt for the agent's messages" })
+  @ApiParam({ name: "publicKey" })
+  @ApiParam({ name: "conversationId" })
+  markRead(
+    @Param("publicKey") publicKey: string,
+    @Param("conversationId") conversationId: string,
+    @Body() dto: WidgetReadDto,
+    @Req() request: Request
+  ): Promise<{ readAt: Date; messageIds: string[] }> {
+    return this.widgetsService.markConversationRead(
+      publicKey,
+      conversationId,
+      dto.sessionToken,
+      this.getMetadata(request)
+    );
+  }
+
+  @Post("widgets/public/:publicKey/conversations/:conversationId/attachments")
+  @Throttle({ default: RATE_LIMITS.widgetMessage })
+  @Header("access-control-allow-origin", "*")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiOperation({ summary: "Visitor uploads a file into the chat" })
+  @ApiConsumes("multipart/form-data")
+  @ApiParam({ name: "publicKey" })
+  @ApiParam({ name: "conversationId" })
+  uploadVisitorAttachment(
+    @Param("publicKey") publicKey: string,
+    @Param("conversationId") conversationId: string,
+    @Body("sessionToken") sessionToken: string | undefined,
+    @UploadedFile() file: UploadedFileLike | undefined,
+    @Req() request: Request
+  ): Promise<MessageDto> {
+    if (!file) {
+      throw new BadRequestException("No file uploaded");
+    }
+
+    return this.widgetsService.sendVisitorAttachment(
+      publicKey,
+      conversationId,
+      sessionToken,
+      file,
+      this.getMetadata(request)
+    );
+  }
+
   @Post("widgets/public/:publicKey/conversations/:conversationId/messages")
+  @Throttle({ default: RATE_LIMITS.widgetMessage })
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Send a public visitor message" })
   @ApiParam({ name: "publicKey" })
@@ -267,9 +311,79 @@ export class WidgetsController {
     return this.widgetsService.updateDefaultWidget(organizationId, dto);
   }
 
+  @Get("organizations/:organizationId/widgets")
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "List every widget in the workspace (one per website or brand)" })
+  @ApiParam({ name: "organizationId" })
+  @ApiOkResponse({ type: WidgetInstallDto, isArray: true })
+  listWidgets(@Param("organizationId") organizationId: string): Promise<WidgetInstallDto[]> {
+    return this.widgetsService.listInstalls(organizationId);
+  }
+
+  @Post("organizations/:organizationId/widgets")
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Add another widget, with its own install code" })
+  @ApiParam({ name: "organizationId" })
+  @ApiCreatedResponse({ type: WidgetInstallDto })
+  createWidget(
+    @Param("organizationId") organizationId: string,
+    @Body() dto: CreateWidgetDto
+  ): Promise<WidgetInstallDto> {
+    return this.widgetsService.createWidget(organizationId, dto.name);
+  }
+
+  @Get("organizations/:organizationId/widgets/:widgetId")
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Get one widget" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "widgetId" })
+  @ApiOkResponse({ type: WidgetInstallDto })
+  getWidget(
+    @Param("organizationId") organizationId: string,
+    @Param("widgetId") widgetId: string
+  ): Promise<WidgetInstallDto> {
+    return this.widgetsService.getInstall(organizationId, widgetId);
+  }
+
+  @Patch("organizations/:organizationId/widgets/:widgetId")
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Update one widget's appearance and messages" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "widgetId" })
+  @ApiOkResponse({ type: WidgetInstallDto })
+  updateWidget(
+    @Param("organizationId") organizationId: string,
+    @Param("widgetId") widgetId: string,
+    @Body() dto: UpdateWidgetDto
+  ): Promise<WidgetInstallDto> {
+    return this.widgetsService.updateWidget(organizationId, widgetId, dto);
+  }
+
+  @Delete("organizations/:organizationId/widgets/:widgetId")
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Remove a widget (the workspace always keeps one)" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "widgetId" })
+  deleteWidget(
+    @Param("organizationId") organizationId: string,
+    @Param("widgetId") widgetId: string
+  ): Promise<{ success: true }> {
+    return this.widgetsService.deleteWidget(organizationId, widgetId);
+  }
+
   private getMetadata(request: Request) {
     return {
-      ipAddress: this.resolveClientIp(request),
+      ipAddress: resolveClientIp(request),
       userAgent:
         typeof request.headers["user-agent"] === "string"
           ? request.headers["user-agent"]
@@ -281,43 +395,5 @@ export class WidgetsController {
             ? request.headers.referer
             : undefined
     };
-  }
-
-  /**
-   * Behind Render/Cloudflare there can be multiple proxy hops, so `request.ip`
-   * (Express trust-proxy) may resolve to an internal proxy address instead of the
-   * real visitor. Prefer the left-most public IP in X-Forwarded-For (the original
-   * client), falling back to request.ip.
-   */
-  private resolveClientIp(request: Request): string | undefined {
-    const forwarded = request.headers["x-forwarded-for"];
-    const raw = Array.isArray(forwarded) ? forwarded.join(",") : forwarded;
-    if (typeof raw === "string" && raw.length > 0) {
-      const candidates = raw
-        .split(",")
-        .map((part) => part.trim().replace(/^::ffff:/, ""))
-        .filter(Boolean);
-      const publicIp = candidates.find((ip) => this.isPublicIp(ip));
-      if (publicIp) {
-        return publicIp;
-      }
-    }
-    return request.ip;
-  }
-
-  private isPublicIp(ip: string): boolean {
-    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
-      return false;
-    }
-    if (/^10\./.test(ip) || /^192\.168\./.test(ip)) {
-      return false;
-    }
-    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) {
-      return false;
-    }
-    if (/^(fc|fd)/i.test(ip)) {
-      return false;
-    }
-    return true;
   }
 }

@@ -85,9 +85,7 @@ export class ConversationsGateway {
       // Only surface our own (safe) auth messages. Never leak internal errors
       // (e.g. a Prisma "Can't reach database server …" with a file path) to the client.
       const isKnown = error instanceof HttpException;
-      const message = isKnown
-        ? (error as HttpException).message
-        : "Couldn't connect to chat. Retrying…";
+      const message = isKnown ? error.message : "Couldn't connect to chat. Retrying…";
       if (!isKnown) {
         this.logger.error(
           `Socket connection error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
@@ -163,7 +161,8 @@ export class ConversationsGateway {
         membershipId: data.organizationContext.membershipId,
         senderType: "AGENT",
         isTyping,
-        preview
+        // Never relay agent drafts: the visitor is in this room and drafts may be internal notes
+        preview: ""
       });
     } else if (data.visitorContext) {
       await this.ensureVisitorConversationAccess(data.visitorContext, conversationId);
@@ -212,22 +211,53 @@ export class ConversationsGateway {
       .emit("conversation.created", { conversation });
   }
 
+  // Conversation records carry internal metadata (tags, notes, legal intake analysis),
+  // so they go to agents only — visitor sockets sit in the conversation room.
   emitConversationUpdated(conversation: ConversationDto): void {
     this.server
       .to(this.organizationRoom(conversation.organizationId))
-      .to(this.conversationRoom(conversation.id))
       .emit("conversation.updated", { conversation });
   }
 
   emitConversationAssigned(conversation: ConversationDto, assignedAgentId: string): void {
     this.server
       .to(this.organizationRoom(conversation.organizationId))
-      .to(this.conversationRoom(conversation.id))
       .to(this.memberRoom(assignedAgentId))
       .emit("conversation.assigned", { conversation, assignedAgentId });
   }
 
+  /**
+   * Read receipts. Agents (org room) always hear about them; the visitor's conversation room
+   * only hears when an agent read their messages.
+   */
+  emitMessagesRead(payload: {
+    organizationId: string;
+    conversationId: string;
+    reader: "AGENT" | "VISITOR";
+    readAt: Date;
+    messageIds: string[];
+  }): void {
+    const target =
+      payload.reader === "AGENT"
+        ? this.server
+            .to(this.organizationRoom(payload.organizationId))
+            .to(this.conversationRoom(payload.conversationId))
+        : this.server.to(this.organizationRoom(payload.organizationId));
+
+    target.emit("messages.read", payload);
+  }
+
+  /** Bell notification for one agent. */
+  emitNotification(membershipId: string, notification: unknown): void {
+    this.server.to(this.memberRoom(membershipId)).emit("notification.created", { notification });
+  }
+
   emitMessageCreated(message: MessageDto): void {
+    if (message.visibility === "INTERNAL") {
+      this.server.to(this.organizationRoom(message.organizationId)).emit("message.created", { message });
+      return;
+    }
+
     this.server
       .to(this.organizationRoom(message.organizationId))
       .to(this.conversationRoom(message.conversationId))

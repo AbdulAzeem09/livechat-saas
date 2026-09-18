@@ -141,4 +141,7 @@ export class InvitationDto {
     description: "Raw invite token — returned ONCE on creation so the link can be shared"
   })
   token?: string | null;
+
+  @ApiPropertyOptional({ description: "Whether the invitation email was delivered to the mail server" })
+  emailSent?: boolean;
 }

@@ -25,8 +25,10 @@ import { ActionResponseDto } from "./dto/action-response.dto";
 import { CreateRoleDto } from "./dto/create-role.dto";
 import { RoleAssignmentDto, RoleDto } from "./dto/role-response.dto";
 import { UpdateRoleDto } from "./dto/update-role.dto";
+import { CurrentOrganization } from "./decorators/current-organization.decorator";
 import { OrganizationAccessGuard } from "./guards/organization-access.guard";
 import { RolesService } from "./roles.service";
+import type { OrganizationRequestContext } from "./types/organization-context";
 
 @ApiTags("Roles")
 @ApiBearerAuth()
@@ -50,9 +52,10 @@ export class RolesController {
   @ApiCreatedResponse({ type: RoleDto })
   createRole(
     @Param("organizationId") organizationId: string,
-    @Body() dto: CreateRoleDto
+    @Body() dto: CreateRoleDto,
+    @CurrentOrganization() context: OrganizationRequestContext
   ): Promise<RoleDto> {
-    return this.rolesService.createRole(organizationId, dto);
+    return this.rolesService.createRole(organizationId, dto, context);
   }
 
   @Patch("roles/:roleId")
@@ -63,9 +66,10 @@ export class RolesController {
   updateRole(
     @Param("organizationId") organizationId: string,
     @Param("roleId") roleId: string,
-    @Body() dto: UpdateRoleDto
+    @Body() dto: UpdateRoleDto,
+    @CurrentOrganization() context: OrganizationRequestContext
   ): Promise<RoleDto> {
-    return this.rolesService.updateRole(organizationId, roleId, dto);
+    return this.rolesService.updateRole(organizationId, roleId, dto, context);
   }
 
   @Delete("roles/:roleId")
@@ -91,9 +95,10 @@ export class RolesController {
   assignRole(
     @Param("organizationId") organizationId: string,
     @Param("membershipId") membershipId: string,
-    @Param("roleId") roleId: string
+    @Param("roleId") roleId: string,
+    @CurrentOrganization() context: OrganizationRequestContext
   ): Promise<RoleAssignmentDto> {
-    return this.rolesService.assignRole(organizationId, membershipId, roleId);
+    return this.rolesService.assignRole(organizationId, membershipId, roleId, context);
   }
 
   @Delete("members/:membershipId/roles/:roleId")
@@ -106,8 +111,9 @@ export class RolesController {
   revokeRole(
     @Param("organizationId") organizationId: string,
     @Param("membershipId") membershipId: string,
-    @Param("roleId") roleId: string
+    @Param("roleId") roleId: string,
+    @CurrentOrganization() context: OrganizationRequestContext
   ): Promise<RoleAssignmentDto> {
-    return this.rolesService.revokeRole(organizationId, membershipId, roleId);
+    return this.rolesService.revokeRole(organizationId, membershipId, roleId, context);
   }
 }

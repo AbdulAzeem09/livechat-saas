@@ -4,6 +4,31 @@ import { PrismaService } from "../prisma/prisma.service";
 export interface ReportSummary {
   totalConversations: number;
   totalMessages: number;
+  /** Real engagement figures for the last 7 days (no estimates). */
+  engagement: {
+    visitors: number;
+    chats: number;
+    /** Share of tracked visitors who started a chat, as a percentage. */
+    engagementRate: number;
+    /** Chats that no agent ever answered. */
+    missedChats: number;
+    averageMessagesPerChat: number;
+  };
+  customers: {
+    total: number;
+    returning: number;
+    newLast7Days: number;
+  };
+  /** Most used conversation tags (counted from the chats themselves). */
+  tagUsage: Array<{ tag: string; count: number }>;
+  campaigns: {
+    total: number;
+    active: number;
+    goals: number;
+    goalsCompleted: number;
+    /** Campaigns are not shown to visitors yet, so there is nothing to convert. */
+    delivering: boolean;
+  };
   byStatus: Record<string, number>;
   openCount: number;
   resolvedCount: number;
@@ -52,7 +77,15 @@ export class ReportsService {
       badCount,
       salesAggregate,
       recentSales,
-      legalConvos
+      legalConvos,
+      visitorsLast7Days,
+      chatsLast7Days,
+      answeredChatIds,
+      contactsTotal,
+      newContacts,
+      taggedConversations,
+      campaignRows,
+      goalRows
     ] = await Promise.all([
       this.prisma.conversation.count({ where: { organizationId } }),
       this.prisma.message.count({ where: { organizationId } }),
@@ -94,7 +127,28 @@ export class ReportsService {
         select: { createdAt: true, metadata: true },
         orderBy: { createdAt: "desc" },
         take: 1000
-      })
+      }),
+      this.prisma.visitorSession.count({ where: { organizationId, startedAt: { gte: since } } }),
+      this.prisma.conversation.findMany({
+        where: { organizationId, createdAt: { gte: since } },
+        select: { id: true }
+      }),
+      this.prisma.message.groupBy({
+        by: ["conversationId"],
+        where: { organizationId, senderType: "AGENT", createdAt: { gte: since } },
+        _count: { _all: true }
+      }),
+      this.prisma.contact.count({ where: { organizationId, deletedAt: null } }),
+      this.prisma.contact.count({
+        where: { organizationId, deletedAt: null, createdAt: { gte: since } }
+      }),
+      this.prisma.conversation.findMany({
+        where: { organizationId, createdAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) } },
+        select: { metadata: true },
+        take: 2000
+      }),
+      this.prisma.campaign.findMany({ where: { organizationId }, select: { enabled: true } }),
+      this.prisma.goal.findMany({ where: { organizationId }, select: { completedCount: true } })
     ]);
 
     const legal = this.computeLegalMetrics(legalConvos);
@@ -127,9 +181,72 @@ export class ReportsService {
       totalConversations > 0 ? Math.round((salesCount / totalConversations) * 1000) / 10 : 0;
     const last7DaysSales = this.buildDailySalesBuckets(since, recentSales);
 
+    // ---- engagement / customers / tags (measured, never estimated) ----
+    const answeredIds = new Set(answeredChatIds.map((row) => row.conversationId));
+    const missedChats = chatsLast7Days.filter((chat) => !answeredIds.has(chat.id)).length;
+    const messagesLast7Days = await this.prisma.message.count({
+      where: { organizationId, createdAt: { gte: since } }
+    });
+    const engagement = {
+      visitors: visitorsLast7Days,
+      chats: chatsLast7Days.length,
+      engagementRate:
+        visitorsLast7Days > 0
+          ? Math.round((chatsLast7Days.length / visitorsLast7Days) * 1000) / 10
+          : 0,
+      missedChats,
+      averageMessagesPerChat:
+        chatsLast7Days.length > 0
+          ? Math.round((messagesLast7Days / chatsLast7Days.length) * 10) / 10
+          : 0
+    };
+
+    const returningContacts = await this.prisma.conversation.groupBy({
+      by: ["contactId"],
+      where: { organizationId, contactId: { not: null } },
+      _count: { _all: true }
+    });
+    const customers = {
+      total: contactsTotal,
+      returning: returningContacts.filter((row) => row._count._all > 1).length,
+      newLast7Days: newContacts
+    };
+
+    const tagCounts = new Map<string, number>();
+    for (const conversation of taggedConversations) {
+      const meta =
+        conversation.metadata && typeof conversation.metadata === "object" && !Array.isArray(conversation.metadata)
+          ? (conversation.metadata as Record<string, unknown>)
+          : null;
+      const tags = Array.isArray(meta?.tags) ? meta.tags : [];
+      for (const tag of tags) {
+        if (typeof tag === "string" && tag.trim()) {
+          const name = tag.trim().toLowerCase();
+          tagCounts.set(name, (tagCounts.get(name) ?? 0) + 1);
+        }
+      }
+    }
+    const tagUsage = [...tagCounts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+
+    const campaigns = {
+      total: campaignRows.length,
+      active: campaignRows.filter((campaign) => campaign.enabled).length,
+      goals: goalRows.length,
+      goalsCompleted: goalRows.reduce((sum, goal) => sum + goal.completedCount, 0),
+      // Campaigns are stored but never displayed to visitors yet.
+      delivering: false
+    };
+
     return {
       totalConversations,
       totalMessages,
+      engagement,
+      customers,
+      tagUsage,
+      campaigns,
       byStatus,
       openCount,
       resolvedCount,

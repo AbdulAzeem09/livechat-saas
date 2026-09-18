@@ -13,9 +13,11 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "../auth/guards/permissions.guard";
+import { RATE_LIMITS } from "../common/http/client-ip-throttler.guard";
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
 import type { UploadedFileLike } from "../storage/file-storage.service";
 import { CreateKnowledgeDto } from "./dto/create-knowledge.dto";
@@ -51,6 +53,7 @@ export class KnowledgeController {
   }
 
   @Post("import/website")
+  @Throttle({ default: RATE_LIMITS.import })
   @Permissions("settings:manage")
   @ApiOperation({ summary: "Import a public web page into the knowledge base" })
   @ApiParam({ name: "organizationId" })
@@ -62,6 +65,7 @@ export class KnowledgeController {
   }
 
   @Post("import/pdf")
+  @Throttle({ default: RATE_LIMITS.import })
   @Permissions("settings:manage")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 15 * 1024 * 1024 } }))
   @ApiOperation({ summary: "Import a PDF file into the knowledge base" })
