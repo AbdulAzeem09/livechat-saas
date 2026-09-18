@@ -163,6 +163,31 @@ enum NotificationStatus {
   @@map("notification_status")
 }
 
+enum UserTokenType {
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+
+  @@map("user_token_type")
+}
+
+enum MessagingChannel {
+  WHATSAPP
+  MESSENGER
+  INSTAGRAM
+  APPLE
+  EMAIL
+
+  @@map("messaging_channel")
+}
+
+enum SsoProvider {
+  GOOGLE
+  MICROSOFT
+  OIDC
+
+  @@map("sso_provider")
+}
+
 enum SubscriptionStatus {
   TRIALING
   ACTIVE
@@ -229,6 +254,20 @@ model AuthProviderIdentity {
   @@unique([provider, providerUserId])
   @@index([userId])
   @@map("auth_provider_identities")
+}
+
+/** One-time tokens for password reset and email verification. */
+model UserToken {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      UserTokenType
+  tokenHash String        @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime?     @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, type])
+  @@map("user_tokens")
 }
 
 model RefreshToken {
@@ -336,6 +375,21 @@ model Invitation {
 
   @@index([organizationId, email])
   @@map("invitations")
+}
+
+/** Visual chatbot: a flow is a set of connected steps the bot walks a visitor through. */
+model BotFlow {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  isActive       Boolean  @default(false) @map("is_active")
+  startNodeId    String?  @map("start_node_id") @db.VarChar(64)
+  nodes          Json     @default("[]")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, isActive])
+  @@map("bot_flows")
 }
 
 model ChatWidget {
@@ -494,6 +548,8 @@ model Conversation {
   departmentId      String?              @map("department_id") @db.Uuid
   assignedAgentId   String?              @map("assigned_agent_id") @db.Uuid
   source            ConversationSource   @default(WIDGET)
+  channel           MessagingChannel?
+  channelThreadId   String?              @map("channel_thread_id") @db.VarChar(191)
   status            ConversationStatus   @default(QUEUED)
   priority          ConversationPriority @default(NORMAL)
   subject           String?              @db.VarChar(200)
@@ -544,6 +600,7 @@ model Message {
   status             MessageStatus     @default(SENT)
   body               String?
   idempotencyKey     String?           @map("idempotency_key") @db.VarChar(120)
+  channelMessageId   String?           @map("channel_message_id") @db.VarChar(191)
   metadata           Json              @default("{}")
   createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   editedAt           DateTime?         @map("edited_at") @db.Timestamptz(6)
@@ -734,8 +791,10 @@ model Notification {
   sentAt                DateTime?           @map("sent_at") @db.Timestamptz(6)
   failedAt              DateTime?           @map("failed_at") @db.Timestamptz(6)
   error                 String?
+  readAt                DateTime?           @map("read_at") @db.Timestamptz(6)
   createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  @@index([organizationId, recipientMembershipId, readAt])
   @@index([organizationId, status, channel])
   @@index([recipientMembershipId])
   @@map("notifications")
@@ -910,6 +969,23 @@ model AnalyticsDailyMetric {
   @@map("analytics_daily_metrics")
 }
 
+/** A CSV of the numbers, emailed on a schedule to people who never open the dashboard. */
+model ReportSchedule {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  reportType     String    @map("report_type") @db.VarChar(40)
+  frequency      String    @default("weekly") @db.VarChar(20)
+  recipients     String[]  @default([])
+  hourUtc        Int       @default(7) @map("hour_utc") @db.SmallInt
+  isActive       Boolean   @default(true) @map("is_active")
+  lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, isActive])
+  @@map("report_schedules")
+}
+
 model ApiKey {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
@@ -941,6 +1017,73 @@ model WebhookEndpoint {
 
   @@index([organizationId, isActive])
   @@map("webhook_endpoints")
+}
+
+/** Weekly working hours per agent; routing skips agents who are off shift. */
+model AgentSchedule {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  membershipId   String   @map("membership_id") @db.Uuid
+  dayOfWeek      Int      @map("day_of_week") @db.SmallInt
+  startMinute    Int      @map("start_minute") @db.SmallInt
+  endMinute      Int      @map("end_minute") @db.SmallInt
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([membershipId, dayOfWeek, startMinute])
+  @@index([organizationId])
+  @@map("agent_schedules")
+}
+
+/** A connected messaging channel (WhatsApp Cloud API, Messenger, Instagram, Apple). */
+model ChannelConnection {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  channel        MessagingChannel
+  externalId     String           @map("external_id") @db.VarChar(191)
+  displayName    String?          @map("display_name") @db.VarChar(160)
+  accessToken    String?          @map("access_token")
+  appSecret      String?          @map("app_secret")
+  verifyToken    String?          @map("verify_token") @db.VarChar(191)
+  settings       Json             @default("{}")
+  isActive       Boolean          @default(true) @map("is_active")
+  lastEventAt    DateTime?        @map("last_event_at") @db.Timestamptz(6)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, channel])
+  @@unique([channel, externalId])
+  @@map("channel_connections")
+}
+
+/** Company SSO: staff with an email on this domain sign in through the identity provider. */
+model SsoConnection {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @unique @map("organization_id") @db.Uuid
+  provider       SsoProvider
+  emailDomain    String      @unique @map("email_domain") @db.VarChar(191)
+  issuer         String?     @db.VarChar(400)
+  clientId       String      @map("client_id") @db.VarChar(400)
+  clientSecret   String      @map("client_secret")
+  defaultRoleId  String?     @map("default_role_id") @db.Uuid
+  autoProvision  Boolean     @default(true) @map("auto_provision")
+  isActive       Boolean     @default(true) @map("is_active")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sso_connections")
+}
+
+/** Apps marketplace: which apps an organization has installed, with their settings. */
+model AppInstall {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId          String   @map("organization_id") @db.Uuid
+  appKey                  String   @map("app_key") @db.VarChar(80)
+  settings                Json     @default("{}")
+  installedByMembershipId String?  @map("installed_by_membership_id") @db.Uuid
+  installedAt             DateTime @default(now()) @map("installed_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, appKey])
+  @@map("app_installs")
 }
 
 model AuditLog {
