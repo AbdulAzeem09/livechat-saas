@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerModule } from "@nestjs/throttler";
+import { EncryptionModule } from "./common/crypto/encryption.module";
+import { MonitoringModule } from "./common/monitoring/monitoring.module";
 import { AuditModule } from "./common/audit/audit.module";
 import { ClientIpThrottlerGuard } from "./common/http/client-ip-throttler.guard";
 import { AdminModule } from "./admin/admin.module";
@@ -36,6 +38,8 @@ import { WidgetsModule } from "./widgets/widgets.module";
 
 @Module({
   imports: [
+    EncryptionModule,
+    MonitoringModule,
     ConfigModule.forRoot({
       cache: true,
       envFilePath: [".env.local", ".env", "../../.env.local", "../../.env"],

@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import type { NextFunction, Request, Response } from "express";
 import helmet from "helmet";
 import { GlobalExceptionFilter } from "./common/filters/global-exception.filter";
+import { MonitoringService } from "./common/monitoring/monitoring.service";
 
 export function configureApp(app: INestApplication, config: ConfigService): void {
   const globalPrefix = config.getOrThrow<string>("API_GLOBAL_PREFIX");
@@ -64,7 +65,8 @@ export function configureApp(app: INestApplication, config: ConfigService): void
       whitelist: true
     })
   );
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // The filter reports 5xx responses into monitoring, which alerts when they pile up.
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(MonitoringService, { strict: false })));
 }
 
 function isPublicWidgetPath(path: string, globalPrefix: string): boolean {

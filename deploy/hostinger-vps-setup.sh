@@ -61,6 +61,7 @@ say "Writing the settings file"
 # Secrets are generated here so nobody has to invent them, and they never leave this server.
 JWT_ACCESS="$(openssl rand -hex 32)"
 JWT_REFRESH="$(openssl rand -hex 32)"
+ENCRYPTION_KEY="$(openssl rand -hex 32)"
 cat > "${APP_DIR}/.env" <<ENV
 NODE_ENV=production
 PORT=4000
@@ -75,6 +76,7 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}?sc
 REDIS_URL=redis://127.0.0.1:6379
 
 JWT_ACCESS_SECRET=${JWT_ACCESS}
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
 JWT_REFRESH_SECRET=${JWT_REFRESH}
 JWT_ACCESS_TTL=15m
 JWT_REFRESH_TTL=30d

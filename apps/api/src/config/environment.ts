@@ -50,6 +50,8 @@ const environmentSchema = z.object({
   SOCKET_IO_CORS_ORIGIN: z.string().default("*"),
   /** Set this to run more than one API instance; chat events travel between them through Redis. */
   REDIS_URL: z.string().optional(),
+  /** Encrypts integration secrets (channel tokens, SSO client secrets, app keys) at rest. */
+  ENCRYPTION_KEY: z.string().optional(),
   // AI (optional - leave empty to run AI suggestions in fallback mode)
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   // Authorize.net (optional - leave empty to run billing in mock mode)

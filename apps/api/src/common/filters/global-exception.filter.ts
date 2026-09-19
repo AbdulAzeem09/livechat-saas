@@ -7,6 +7,7 @@ import {
   Logger
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import type { MonitoringService } from "../monitoring/monitoring.service";
 
 interface ErrorResponseBody {
   success: false;
@@ -23,6 +24,9 @@ interface ErrorResponseBody {
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
+
+  /** Optional so the filter still works in tests that construct it directly. */
+  constructor(private readonly monitoring?: MonitoringService) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
@@ -50,6 +54,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         body.error.message,
         exception instanceof Error ? exception.stack : undefined
       );
+      this.monitoring?.recordError(`${request.method} ${request.url}: ${body.error.message}`);
     }
 
     response.status(status).json(body);
