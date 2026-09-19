@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger, UnauthorizedException, forwardRef } from "@
 import { ConfigService } from "@nestjs/config";
 import { MessagingChannel } from "@prisma/client";
 import { MailService } from "../mail/mail.service";
+import { EncryptionService } from "../common/crypto/encryption.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ChannelsService } from "./channels.service";
 
@@ -34,6 +35,7 @@ export class EmailChannelService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly encryption: EncryptionService,
     @Inject(forwardRef(() => ChannelsService))
     private readonly channels: ChannelsService
   ) {}
@@ -59,7 +61,7 @@ export class EmailChannelService {
       return { received: true };
     }
 
-    this.assertSignature(connection.appSecret, rawBody, signature);
+    this.assertSignature(this.encryption.decrypt(connection.appSecret), rawBody, signature);
 
     const threadId = this.addressOf(email.from);
     if (!threadId) {

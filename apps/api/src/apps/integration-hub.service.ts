@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
+import { EncryptionService } from "../common/crypto/encryption.service";
 import { safeFetch } from "../common/network/safe-fetch";
+import { APP_SECRET_FIELDS } from "./apps.service";
 
 export interface CommerceOrder {
   id: string;
@@ -31,7 +33,8 @@ export class IntegrationHubService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly encryption: EncryptionService
   ) {}
 
   // ------------------------------------------------------------------- Slack
@@ -214,9 +217,12 @@ export class IntegrationHubService {
   ): Promise<Record<string, unknown>> {
     const install = await this.prisma.appInstall.findFirst({ where: { organizationId, appKey } });
 
-    return install?.settings && typeof install.settings === "object" && !Array.isArray(install.settings)
-      ? install.settings
-      : {};
+    const settings =
+      install?.settings && typeof install.settings === "object" && !Array.isArray(install.settings)
+        ? install.settings
+        : {};
+
+    return this.encryption.decryptFields(settings, APP_SECRET_FIELDS);
   }
 
   private mapOrder(raw: unknown): CommerceOrder {

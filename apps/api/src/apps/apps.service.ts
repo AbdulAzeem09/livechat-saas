@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuditService } from "../common/audit/audit.service";
+import { EncryptionService } from "../common/crypto/encryption.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface AppCatalogEntry {
@@ -16,6 +17,9 @@ export interface InstalledApp extends AppCatalogEntry {
   settings: Record<string, unknown>;
   installedAt: Date | null;
 }
+
+/** Settings keys that hold a provider secret rather than a plain setting. */
+export const APP_SECRET_FIELDS = ["accessToken", "webhookUrl", "apiKey", "secret"];
 
 /** Apps a workspace can switch on. Each one maps to a feature that already exists. */
 export const APP_CATALOG: AppCatalogEntry[] = [
@@ -79,7 +83,8 @@ export const APP_CATALOG: AppCatalogEntry[] = [
 export class AppsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly encryption: EncryptionService
   ) {}
 
   async list(organizationId: string): Promise<InstalledApp[]> {
@@ -92,10 +97,13 @@ export class AppsService {
       return {
         ...app,
         installed: Boolean(install),
-        settings:
+        // Provider keys are encrypted in the database; the screen needs them readable.
+        settings: this.encryption.decryptFields(
           install?.settings && typeof install.settings === "object" && !Array.isArray(install.settings)
             ? install.settings
             : {},
+          APP_SECRET_FIELDS
+        ),
         installedAt: install?.installedAt ?? null
       };
     });
@@ -109,15 +117,18 @@ export class AppsService {
   ): Promise<InstalledApp[]> {
     this.assertKnown(appKey);
 
+    // Provider keys live inside this JSON, so they are encrypted before they are stored.
+    const stored = this.encryption.encryptFields(settings, APP_SECRET_FIELDS) as Prisma.InputJsonValue;
+
     await this.prisma.appInstall.upsert({
       where: { organizationId_appKey: { organizationId, appKey } },
       create: {
         organizationId,
         appKey,
         installedByMembershipId: membershipId,
-        settings: settings as Prisma.InputJsonValue
+        settings: stored
       },
-      update: { settings: settings as Prisma.InputJsonValue }
+      update: { settings: stored }
     });
     this.audit.record({
       organizationId,

@@ -13,6 +13,7 @@ import { AGENT_PERMISSIONS } from "../auth/auth.constants";
 import { AuthService, type RequestMetadata } from "../auth/auth.service";
 import type { AuthResponseDto } from "../auth/dto/auth-response.dto";
 import { assertPublicHttpUrl, safeFetch } from "../common/network/safe-fetch";
+import { EncryptionService } from "../common/crypto/encryption.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface SsoConnectionDto {
@@ -44,6 +45,7 @@ export class SsoService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
     private readonly config: ConfigService,
     private readonly authService: AuthService
   ) {}
@@ -91,7 +93,7 @@ export class SsoService {
       provider: input.provider,
       emailDomain,
       clientId: input.clientId.trim(),
-      clientSecret: input.clientSecret.trim(),
+      clientSecret: this.encryption.encrypt(input.clientSecret.trim()) ?? input.clientSecret.trim(),
       issuer: input.issuer?.trim() ?? null,
       autoProvision: input.autoProvision ?? true,
       isActive: true
@@ -169,7 +171,7 @@ export class SsoService {
       body: new URLSearchParams({
         code,
         client_id: connection.clientId,
-        client_secret: connection.clientSecret,
+        client_secret: this.encryption.decrypt(connection.clientSecret) ?? connection.clientSecret,
         redirect_uri: this.redirectUri(),
         grant_type: "authorization_code"
       }),

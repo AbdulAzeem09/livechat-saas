@@ -166,6 +166,7 @@ enum NotificationStatus {
 enum UserTokenType {
   PASSWORD_RESET
   EMAIL_VERIFICATION
+  TWO_FACTOR_CHALLENGE
 
   @@map("user_token_type")
 }
@@ -231,6 +232,14 @@ model User {
   status          UserStatus @default(ACTIVE)
   emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(6)
   lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  /** Encrypted at rest; only set once two-factor sign-in is switched on. */
+  twoFactorSecret       String?   @map("two_factor_secret")
+  twoFactorEnabledAt    DateTime? @map("two_factor_enabled_at") @db.Timestamptz(6)
+  /** Hashed one-time codes for when the phone is lost. */
+  twoFactorRecoveryCodes String[] @default([]) @map("two_factor_recovery_codes")
+  failedLoginAttempts   Int       @default(0) @map("failed_login_attempts") @db.SmallInt
+  lockedUntil           DateTime? @map("locked_until") @db.Timestamptz(6)
+  passwordChangedAt     DateTime? @map("password_changed_at") @db.Timestamptz(6)
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(6)

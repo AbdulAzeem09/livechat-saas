@@ -24,6 +24,7 @@ import { maskCardNumbers } from "../common/text/mask-sensitive";
 import { ContactsService } from "../contacts/contacts.service";
 import { ConversationsGateway } from "../conversations/conversations.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
+import { EncryptionService } from "../common/crypto/encryption.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { EmailChannelService } from "./email-channel.service";
 
@@ -67,6 +68,7 @@ export class ChannelsService {
     private readonly gateway: ConversationsGateway,
     private readonly contacts: ContactsService,
     private readonly notifications: NotificationsService,
+    private readonly encryption: EncryptionService,
     @Inject(forwardRef(() => EmailChannelService))
     private readonly email: EmailChannelService
   ) {}
@@ -126,8 +128,8 @@ export class ChannelsService {
 
     const data = {
       externalId: input.externalId.trim(),
-      accessToken: input.accessToken?.trim() ?? null,
-      appSecret: input.appSecret?.trim() ?? null,
+      accessToken: this.encryption.encrypt(input.accessToken?.trim() ?? null),
+      appSecret: this.encryption.encrypt(input.appSecret?.trim() ?? null),
       verifyToken: input.verifyToken?.trim() || this.randomVerifyToken(),
       displayName: input.displayName?.trim() ?? null,
       isActive: true
@@ -251,7 +253,7 @@ export class ChannelsService {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${connection.accessToken}`
+          authorization: `Bearer ${this.encryption.decrypt(connection.accessToken) ?? ""}`
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(15_000)
@@ -417,7 +419,7 @@ export class ChannelsService {
     }
 
     const expected = Buffer.from(
-      `sha256=${createHmac("sha256", connection.appSecret).update(rawBody).digest("hex")}`
+      `sha256=${createHmac("sha256", this.encryption.decrypt(connection.appSecret) ?? "").update(rawBody).digest("hex")}`
     );
     const received = Buffer.from(signature.trim());
 
