@@ -12,8 +12,11 @@ import { AuthProvider, Prisma, RoleKey, UserStatus, UserTokenType } from "@prism
 import bcrypt from "bcryptjs";
 import { OWNER_PERMISSIONS } from "./auth.constants";
 import type { AuthResponseDto, AuthUserDto, GoogleAuthUrlResponseDto } from "./dto/auth-response.dto";
+import type { TwoFactorChallengeDto } from "./dto/two-factor.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RegisterDto } from "./dto/register.dto";
+import { MonitoringService } from "../common/monitoring/monitoring.service";
+import { AccountSecurityService } from "./account-security.service";
 import { AuditService } from "../common/audit/audit.service";
 import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -42,6 +45,9 @@ interface GoogleProfileResponse {
   picture?: string;
 }
 
+/** The window between the password step and the authenticator code. */
+const TWO_FACTOR_CHALLENGE_MINUTES = 5;
+
 @Injectable()
 export class AuthService {
   private readonly passwordSaltRounds = 12;
@@ -51,11 +57,14 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly accountSecurity: AccountSecurityService,
+    private readonly monitoring: MonitoringService
   ) {}
 
   async register(dto: RegisterDto, metadata: RequestMetadata): Promise<AuthResponseDto> {
     const email = this.normalizeEmail(dto.email);
+    this.accountSecurity.assertPasswordIsStrong(dto.password, email);
     const requestedSlug = dto.organizationSlug ?? this.slugify(dto.organizationName);
     const passwordHash = await bcrypt.hash(dto.password, this.passwordSaltRounds);
 
@@ -159,7 +168,11 @@ export class AuthService {
     return this.createSession(result.user.id, metadata, result.organizationId);
   }
 
-  async login(dto: LoginDto, metadata: RequestMetadata): Promise<AuthResponseDto> {
+  /** Returned instead of a session when the account has two-factor sign-in switched on. */
+  async login(
+    dto: LoginDto,
+    metadata: RequestMetadata
+  ): Promise<AuthResponseDto | TwoFactorChallengeDto> {
     const email = this.normalizeEmail(dto.email);
     const user = await this.prisma.user.findUnique({
       where: { email }
@@ -169,10 +182,30 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
+    // Repeated guessing pauses the account before it pauses the attacker's patience.
+    this.accountSecurity.assertNotLocked(user);
+
     const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
 
     if (!passwordMatches) {
+      await this.accountSecurity.recordFailedLogin(user.id);
+      this.monitoring.recordFailedLogin(`${email} from ${metadata.ipAddress ?? "unknown IP"}`);
+      void this.recordAccountEvent(user.id, "auth.login_failed", metadata, { method: "password" });
       throw new UnauthorizedException("Invalid email or password");
+    }
+
+    await this.accountSecurity.clearFailedLogins(user.id);
+
+    // With two-factor on, the password only earns a short-lived challenge.
+    if (this.accountSecurity.isTwoFactorEnabled(user)) {
+      return {
+        twoFactorRequired: true,
+        challengeToken: await this.issueUserToken(
+          user.id,
+          UserTokenType.TWO_FACTOR_CHALLENGE,
+          TWO_FACTOR_CHALLENGE_MINUTES
+        )
+      };
     }
 
     await this.prisma.user.update({
@@ -182,6 +215,36 @@ export class AuthService {
     void this.recordAccountEvent(user.id, "auth.login", metadata, { method: "password" });
 
     return this.createSession(user.id, metadata);
+  }
+
+  /** Second step of sign-in: the code from the authenticator app, or a recovery code. */
+  async completeTwoFactorLogin(
+    challengeToken: string,
+    code: string,
+    metadata: RequestMetadata
+  ): Promise<AuthResponseDto> {
+    // An expired or already-used challenge should send the person back to sign-in, not read
+    // as a malformed request.
+    const record = await this.consumeUserToken(
+      challengeToken,
+      UserTokenType.TWO_FACTOR_CHALLENGE
+    ).catch(() => {
+      throw new UnauthorizedException("This sign-in has expired — please start again");
+    });
+    const userId = record.userId;
+
+    if (!(await this.accountSecurity.verifySecondFactor(userId, code))) {
+      void this.recordAccountEvent(userId, "auth.two_factor_failed", metadata, {});
+      throw new UnauthorizedException("That code didn't match");
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date() }
+    });
+    void this.recordAccountEvent(userId, "auth.login", metadata, { method: "password+2fa" });
+
+    return this.createSession(userId, metadata);
   }
 
   async refresh(refreshToken: string | undefined, metadata: RequestMetadata): Promise<AuthResponseDto> {
@@ -313,13 +376,20 @@ export class AuthService {
   /** Finish a password reset: set the new password and sign every other session out. */
   async resetPassword(token: string, password: string): Promise<void> {
     const record = await this.consumeUserToken(token, UserTokenType.PASSWORD_RESET);
+    this.accountSecurity.assertPasswordIsStrong(password);
     const passwordHash = await bcrypt.hash(password, this.passwordSaltRounds);
 
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: record.userId },
         // Clicking the emailed link also proves the address belongs to them.
-        data: { passwordHash, emailVerifiedAt: new Date() }
+        data: {
+          passwordHash,
+          emailVerifiedAt: new Date(),
+          passwordChangedAt: new Date(),
+          failedLoginAttempts: 0,
+          lockedUntil: null
+        }
       }),
       this.prisma.refreshToken.updateMany({
         where: { userId: record.userId, revokedAt: null },

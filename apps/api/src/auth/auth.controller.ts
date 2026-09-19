@@ -34,6 +34,17 @@ import {
 } from "./dto/auth-response.dto";
 import { GoogleCallbackDto } from "./dto/google-callback.dto";
 import { ForgotPasswordDto, ResetPasswordDto, VerifyEmailDto } from "./dto/password-reset.dto";
+import {
+  DisableTwoFactorDto,
+  EnableTwoFactorDto,
+  TwoFactorChallengeDto,
+  VerifyTwoFactorDto
+} from "./dto/two-factor.dto";
+import {
+  AccountSecurityService,
+  type TwoFactorEnabled,
+  type TwoFactorSetup
+} from "./account-security.service";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { RegisterDto } from "./dto/register.dto";
@@ -52,6 +63,7 @@ class ActionResultDto {
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly accountSecurity: AccountSecurityService,
     private readonly config: ConfigService
   ) {}
 
@@ -79,9 +91,16 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response
-  ): Promise<AuthResponseDto> {
+  ): Promise<AuthResponseDto | TwoFactorChallengeDto> {
     const result = await this.authService.login(dto, this.getRequestMetadata(request));
+
+    // With two-factor on there is no session yet — only a challenge to answer.
+    if ("twoFactorRequired" in result) {
+      return result;
+    }
+
     this.setRefreshCookie(response, result);
+
     return result;
   }
 
@@ -116,6 +135,59 @@ export class AuthController {
     await this.authService.logout(refreshToken);
     this.clearRefreshCookie(response);
     return { success: true };
+  }
+
+  @Post("2fa/verify")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: RATE_LIMITS.login })
+  @ApiOperation({ summary: "Finish signing in with the code from the authenticator app" })
+  async verifyTwoFactor(
+    @Body() dto: VerifyTwoFactorDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<AuthResponseDto> {
+    const session = await this.authService.completeTwoFactorLogin(
+      dto.challengeToken,
+      dto.code,
+      this.getRequestMetadata(request)
+    );
+
+    this.setRefreshCookie(response, session);
+
+    return session;
+  }
+
+  @Post("2fa/setup")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Get a secret to put into an authenticator app" })
+  startTwoFactor(@CurrentUser() user: AuthUser): Promise<TwoFactorSetup> {
+    return this.accountSecurity.startTwoFactorSetup(user.userId, user.email);
+  }
+
+  @Post("2fa/enable")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Switch two-factor on after the first code works" })
+  enableTwoFactor(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: EnableTwoFactorDto
+  ): Promise<TwoFactorEnabled> {
+    return this.accountSecurity.enableTwoFactor(user.userId, dto.code);
+  }
+
+  @Post("2fa/disable")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Switch two-factor off (asks for the password)" })
+  disableTwoFactor(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: DisableTwoFactorDto
+  ): Promise<{ disabled: true }> {
+    return this.accountSecurity.disableTwoFactor(user.userId, dto.password);
   }
 
   @Post("password/forgot")
