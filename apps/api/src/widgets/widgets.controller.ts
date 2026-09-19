@@ -46,6 +46,7 @@ import { SendWidgetMessageDto } from "./dto/send-widget-message.dto";
 import { StartWidgetSessionDto } from "./dto/start-widget-session.dto";
 import { WidgetHeartbeatDto } from "./dto/widget-heartbeat.dto";
 import { WidgetReadDto } from "./dto/widget-read.dto";
+import { buildCustomerSdk } from "./customer-sdk";
 import { CreateWidgetDto } from "./dto/create-widget.dto";
 import { UpdateWidgetDto } from "./dto/update-widget.dto";
 import {
@@ -60,6 +61,14 @@ import { WidgetsService } from "./widgets.service";
 @Controller()
 export class WidgetsController {
   constructor(private readonly widgetsService: WidgetsService) {}
+
+  @Get("customer-sdk.js")
+  @Header("content-type", "application/javascript; charset=utf-8")
+  @Header("cache-control", "public, max-age=300")
+  @ApiOperation({ summary: "JavaScript SDK for teams who want to build their own chat UI" })
+  customerSdk(): string {
+    return buildCustomerSdk();
+  }
 
   @Get("widget.js")
   @Header("content-type", "application/javascript; charset=utf-8")

@@ -626,3 +626,39 @@ export interface ReportSchedule {
   isActive: boolean;
   lastRunAt: string | null;
 }
+
+export interface ConversationRevenue {
+  conversationId: string;
+  currency: string;
+  totalCents: number;
+  orderCount: number;
+  orders: Array<{ amountCents: number; reference: string | null; at: string }>;
+}
+
+export interface RevenueOverview {
+  currency: string;
+  totalCents: number;
+  chatsWithRevenue: number;
+  conversionRate: number;
+  averageOrderCents: number;
+  agents: Array<{
+    membershipId: string;
+    name: string;
+    email: string;
+    chatsWithRevenue: number;
+    totalCents: number;
+    currency: string;
+  }>;
+  topChats: Array<{
+    conversationId: string;
+    subject: string | null;
+    totalCents: number;
+    agentName: string | null;
+  }>;
+}
+
+export interface EnhancedText {
+  text: string;
+  usedAI: boolean;
+  changed: boolean;
+}

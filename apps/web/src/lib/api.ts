@@ -30,6 +30,9 @@ import type {
   Organization,
   OrganizationMember,
   ReportSummary,
+  ConversationRevenue,
+  RevenueOverview,
+  EnhancedText,
   ReportSchedule,
   ConversationSummary,
   TagSuggestion,
@@ -1615,6 +1618,43 @@ export function deleteReportSchedule(
   return apiRequest<{ success: true }>(
     `/organizations/${organizationId}/reports/schedules/${scheduleId}`,
     { accessToken, method: "DELETE" }
+  );
+}
+
+// ---- what the chats were worth ----
+
+export function conversationRevenue(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string
+): Promise<ConversationRevenue> {
+  return apiRequest<ConversationRevenue>(
+    `/organizations/${organizationId}/conversations/${conversationId}/revenue`,
+    { accessToken }
+  );
+}
+
+export function revenueOverview(
+  organizationId: string,
+  accessToken: string,
+  days = 30
+): Promise<RevenueOverview> {
+  return apiRequest<RevenueOverview>(
+    `/organizations/${organizationId}/reports/revenue?days=${days}`,
+    { accessToken }
+  );
+}
+
+/** Tidy up the agent's draft before the customer sees it. */
+export function enhanceText(
+  organizationId: string,
+  conversationId: string,
+  accessToken: string,
+  input: { text: string; tone?: "professional" | "friendly" | "shorter" }
+): Promise<EnhancedText> {
+  return apiRequest<EnhancedText>(
+    `/organizations/${organizationId}/conversations/${conversationId}/ai/enhance`,
+    { accessToken, method: "POST", body: JSON.stringify(input) }
   );
 }
 

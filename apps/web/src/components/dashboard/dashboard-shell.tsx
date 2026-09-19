@@ -133,6 +133,9 @@ import {
   deleteContactNote,
   getContact,
   listAuditLogs,
+  enhanceText,
+  conversationRevenue,
+  revenueOverview,
   downloadReportCsv,
   listReportSchedules,
   createReportSchedule,
@@ -180,6 +183,8 @@ import { playChime, primeAudio, requestNotificationPermission, showBrowserNotifi
 import type { VoiceGender } from "@/lib/notify";
 import { clearSession, readSession, type StoredSession } from "@/lib/session";
 import type {
+  ConversationRevenue,
+  RevenueOverview,
   ReportSchedule,
   ConversationSummary,
   BotFlow,
@@ -3072,6 +3077,30 @@ export function DashboardShell() {
     }
   }
 
+  async function handleEnhanceText(conversationId: string, text: string) {
+    if (!session || !activeOrganization) {
+      return null;
+    }
+    try {
+      const result = await enhanceText(activeOrganization.id, conversationId, session.accessToken, {
+        text
+      });
+
+      setNotice(
+        result.changed
+          ? result.usedAI
+            ? "Reply polished."
+            : "Tidied up. Add an AI key in Settings for a full rewrite."
+          : "That already reads well."
+      );
+
+      return result.text;
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not improve that text");
+      return null;
+    }
+  }
+
   async function handleAutoTagConversation(conversationId: string) {
     if (!session || !activeOrganization) {
       return;
@@ -3480,6 +3509,7 @@ export function DashboardShell() {
               {activeScreen === "chats" && (
                 <ChatsScreen
                   onRequestSummary={handleSummariseConversation}
+                  onEnhanceText={handleEnhanceText}
                   onRequestAutoTag={handleAutoTagConversation}
                   cannedResponses={cannedResponses}
                   chatLink={chatLink}
@@ -5152,6 +5182,7 @@ function OverviewScreen({
 
 function ChatsScreen({
   onRequestSummary,
+  onEnhanceText,
   onRequestAutoTag,
   cannedResponses,
   chatLink,
@@ -5188,6 +5219,7 @@ function ChatsScreen({
   visitorTypingPreview
 }: {
   onRequestSummary: (conversationId: string) => Promise<ConversationSummary | null>;
+  onEnhanceText: (conversationId: string, text: string) => Promise<string | null>;
   onRequestAutoTag: (conversationId: string) => Promise<void>;
   cannedResponses: CannedResponse[];
   chatLink: string;
@@ -5235,6 +5267,22 @@ function ChatsScreen({
   const { ask, dialog } = useAskDialog();
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [isSummarising, setIsSummarising] = useState(false);
+  const [isImproving, setIsImproving] = useState(false);
+
+  async function onImprove() {
+    if (!selectedConversation || !composer.trim()) {
+      return;
+    }
+    setIsImproving(true);
+    try {
+      const improved = await onEnhanceText(selectedConversation.id, composer);
+      if (improved) {
+        setComposer(improved);
+      }
+    } finally {
+      setIsImproving(false);
+    }
+  }
 
   // A summary belongs to one chat; drop it when the agent opens another.
   useEffect(() => {
@@ -5618,6 +5666,15 @@ function ChatsScreen({
                   type="button"
                 >
                   {isSummarising ? "📋 Reading…" : "📋 Summarise"}
+                </button>
+                <button
+                  className="rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-200 hover:bg-amber-500/25 disabled:opacity-60"
+                  disabled={isImproving || !composer.trim()}
+                  onClick={onImprove}
+                  title="Fix the spelling and tone before the customer sees it"
+                  type="button"
+                >
+                  {isImproving ? "✨ Polishing…" : "✨ Improve"}
                 </button>
                 <button
                   className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25"
@@ -8811,6 +8868,163 @@ function ReportExportPanel({
   );
 }
 
+function money(cents: number, currency: string): string {
+  return `${currency === "USD" ? "$" : `${currency} `}${(cents / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+/**
+ * The answer to "what is this chat widget actually doing for my business?" — money made
+ * through chats, which agents made it, and which conversations were worth the most.
+ */
+function RevenueReport({
+  accessToken,
+  organizationId,
+  report
+}: {
+  accessToken: string | null;
+  organizationId: string | null;
+  report: ReportSummary | null;
+}) {
+  const [revenue, setRevenue] = useState<RevenueOverview | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    revenueOverview(organizationId, accessToken)
+      .then((result) => {
+        if (!cancelled) setRevenue(result);
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load revenue");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  const currency = revenue?.currency ?? "USD";
+
+  return (
+    <div className="min-h-full bg-white px-7 py-6 text-[#111214]">
+      <h2 className="text-lg font-bold">Revenue from chats</h2>
+      <p className="mb-5 mt-1 text-sm text-slate-500">
+        Sales recorded against a conversation. Send <code>LiveChatSaaS.trackSale(amount)</code> from
+        your checkout page and every sale is credited to the chat that led to it.
+      </p>
+
+      {error ? (
+        <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          ["From chats", money(revenue?.totalCents ?? 0, currency)],
+          ["Chats that sold", String(revenue?.chatsWithRevenue ?? 0)],
+          ["Conversion", `${revenue?.conversionRate ?? 0}%`],
+          ["Average order", money(revenue?.averageOrderCents ?? 0, currency)]
+        ].map(([label, value]) => (
+          <div className="rounded-xl border border-slate-200 p-5" key={label}>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+            <p className="mt-2 text-2xl font-black">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {isLoading ? <p className="mt-6 text-sm text-slate-500">Loading…</p> : null}
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 p-5">
+          <p className="text-sm font-bold">By agent</p>
+          {revenue?.agents.length ? (
+            <table className="mt-3 w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="pb-2">Agent</th>
+                  <th className="pb-2">Chats</th>
+                  <th className="pb-2 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {revenue.agents.map((agent) => (
+                  <tr className="border-t border-slate-100" key={agent.membershipId}>
+                    <td className="py-2">
+                      <span className="block font-semibold">{agent.name}</span>
+                      <span className="block text-xs text-slate-500">{agent.email}</span>
+                    </td>
+                    <td className="py-2">{agent.chatsWithRevenue}</td>
+                    <td className="py-2 text-right font-bold">
+                      {money(agent.totalCents, agent.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="mt-3 text-sm text-slate-400">
+              No sales credited to an agent yet.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5">
+          <p className="text-sm font-bold">Best chats</p>
+          {revenue?.topChats.length ? (
+            <ul className="mt-3 grid gap-2">
+              {revenue.topChats.map((chat) => (
+                <li
+                  className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-sm first:border-0 first:pt-0"
+                  key={chat.conversationId}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">
+                      {chat.subject ?? "Website chat"}
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      {chat.agentName ?? "Unassigned"}
+                    </span>
+                  </span>
+                  <span className="font-bold">{money(chat.totalCents, currency)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-slate-400">No chats have produced a sale yet.</p>
+          )}
+        </div>
+      </div>
+
+      {report ? (
+        <p className="mt-6 text-xs text-slate-400">
+          {report.ecommerce.salesCount} order{report.ecommerce.salesCount === 1 ? "" : "s"} recorded
+          in total, including any not tied to a chat.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Where a widget can be chatted with directly, without a website to embed it in. */
+function hostedChatUrl(publicKey: string): string {
+  const base = typeof window === "undefined" ? "" : window.location.origin;
+
+  return `${base}/chat/${publicKey}`;
+}
+
 function ReportsScreen({
   accessToken,
   organizationId,
@@ -8929,6 +9143,12 @@ function ReportsScreen({
           <ReportStat label="Revenue" value={formatPrice(ec.salesTotalCents, ec.currency)} />
         </div>
       </div>
+    );
+  }
+
+  if (view === "Ecommerce" || view === "Revenue") {
+    return (
+      <RevenueReport accessToken={accessToken} organizationId={organizationId} report={report} />
     );
   }
 
@@ -12461,6 +12681,35 @@ function SettingsScreen({
               Open demo site
             </button>
           </div>
+
+          {widgetInstall ? (
+            <div className="mt-5 rounded-lg border border-slate-200 p-4">
+              <p className="text-sm font-bold">No website? Use a chat link</p>
+              <p className="mt-1 text-xs text-slate-500">
+                This link opens the chat on its own page — put it in an Instagram bio, on a visiting
+                card, or behind a QR code on a table. Nothing to install.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <code className="flex-1 break-all rounded-md bg-slate-100 px-3 py-2 text-xs">
+                  {hostedChatUrl(widgetInstall.publicKey)}
+                </code>
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-xs font-bold hover:bg-slate-50"
+                  onClick={() => void onCopy(hostedChatUrl(widgetInstall.publicKey), "Chat link copied.")}
+                  type="button"
+                >
+                  Copy link
+                </button>
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-xs font-bold hover:bg-slate-50"
+                  onClick={() => window.open(hostedChatUrl(widgetInstall.publicKey), "_blank", "noopener,noreferrer")}
+                  type="button"
+                >
+                  Open
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
