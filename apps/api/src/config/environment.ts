@@ -48,6 +48,8 @@ const environmentSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(""),
   SUPABASE_STORAGE_BUCKET: z.string().min(1).default("attachments"),
   SOCKET_IO_CORS_ORIGIN: z.string().default("*"),
+  /** Set this to run more than one API instance; chat events travel between them through Redis. */
+  REDIS_URL: z.string().optional(),
   // AI (optional - leave empty to run AI suggestions in fallback mode)
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   // Authorize.net (optional - leave empty to run billing in mock mode)

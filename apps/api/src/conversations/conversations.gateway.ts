@@ -4,7 +4,8 @@ import {
   MessageBody,
   SubscribeMessage,
   WebSocketGateway,
-  WebSocketServer
+  WebSocketServer,
+  WsException
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import { AuthService } from "../auth/auth.service";
@@ -113,7 +114,7 @@ export class ConversationsGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: ConversationRoomPayload
   ): Promise<{ ok: true; conversationId: string }> {
-    const data = this.getClientData(client);
+    const data = await this.getAuthenticatedClientData(client);
     const conversationId = this.requireConversationId(payload);
 
     if (data.organizationContext) {
@@ -122,7 +123,8 @@ export class ConversationsGateway {
     } else if (data.visitorContext) {
       await this.ensureVisitorConversationAccess(data.visitorContext, conversationId);
     } else {
-      throw new Error("Socket is not authenticated");
+      // Say what happened instead of an opaque "Internal server error".
+      throw new WsException("This chat connection is not ready yet. Reconnecting…");
     }
 
     await client.join(this.conversationRoom(conversationId));
@@ -146,7 +148,7 @@ export class ConversationsGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingPayload
   ): Promise<{ ok: true; conversationId: string }> {
-    const data = this.getClientData(client);
+    const data = await this.getAuthenticatedClientData(client);
     const conversationId = this.requireConversationId(payload);
 
     const isTyping = payload.isTyping === true;
@@ -174,7 +176,8 @@ export class ConversationsGateway {
         preview
       });
     } else {
-      throw new Error("Socket is not authenticated");
+      // Say what happened instead of an opaque "Internal server error".
+      throw new WsException("This chat connection is not ready yet. Reconnecting…");
     }
 
     return { ok: true, conversationId };
@@ -420,6 +423,32 @@ export class ConversationsGateway {
     }
 
     return null;
+  }
+
+  /**
+   * handleConnection authenticates asynchronously, so a client can send its first message
+   * (usually conversation.join) before we have finished. Wait a moment for the handshake
+   * instead of failing the join and leaving that visitor without live updates.
+   */
+  private async getAuthenticatedClientData(
+    client: Socket,
+    timeoutMs = 3000
+  ): Promise<ChatSocketData> {
+    const startedAt = Date.now();
+
+    for (;;) {
+      const data = this.getClientData(client);
+
+      if (data.organizationContext || data.visitorContext) {
+        return data;
+      }
+
+      if (!client.connected || Date.now() - startedAt >= timeoutMs) {
+        return data;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   }
 
   private getClientData(client: Socket): ChatSocketData {

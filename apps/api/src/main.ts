@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { configureApp } from "./app.setup";
+import { RedisIoAdapter } from "./common/realtime/redis-io.adapter";
 import { setupSwagger } from "./docs/swagger";
 
 // Keep the API alive if a stray background promise (e.g. a transient DB pooler
@@ -31,6 +32,11 @@ async function bootstrap() {
 
   configureApp(app, config);
   setupSwagger(app, config);
+
+  // Several instances share their chat rooms through Redis; without REDIS_URL this is a no-op.
+  const socketAdapter = new RedisIoAdapter(app, config);
+  await socketAdapter.connect();
+  app.useWebSocketAdapter(socketAdapter);
 
   const port = config.getOrThrow<number>("PORT");
   const apiUrl = config.getOrThrow<string>("API_URL");
