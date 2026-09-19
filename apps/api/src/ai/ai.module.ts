@@ -5,11 +5,12 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { AiController } from "./ai.controller";
 import { AiService } from "./ai.service";
 import { ConversationInsightsService } from "./conversation-insights.service";
+import { TextEnhancementService } from "./text-enhancement.service";
 
 @Module({
   imports: [AuthModule, OrganizationsModule, PrismaModule],
   controllers: [AiController],
-  providers: [AiService, ConversationInsightsService],
-  exports: [AiService, ConversationInsightsService]
+  providers: [AiService, ConversationInsightsService, TextEnhancementService],
+  exports: [AiService, ConversationInsightsService, TextEnhancementService]
 })
 export class AiModule {}

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { AiModule } from "../ai/ai.module";
 import { AppsModule } from "../apps/apps.module";
+import { ReportsModule } from "../reports/reports.module";
 import { ChannelsModule } from "../channels/channels.module";
 import { AuthModule } from "../auth/auth.module";
 import { OrganizationsModule } from "../organizations/organizations.module";
@@ -13,6 +14,7 @@ import { ConversationsService } from "./conversations.service";
   imports: [
     AiModule,
     AppsModule,
+    ReportsModule,
     AuthModule,
     forwardRef(() => ChannelsModule),
     OrganizationsModule,

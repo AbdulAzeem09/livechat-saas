@@ -1,4 +1,4 @@
-import { Controller, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -10,6 +10,8 @@ import {
   type ConversationSummary,
   type TagSuggestion
 } from "./conversation-insights.service";
+import { EnhanceTextDto } from "./dto/enhance-text.dto";
+import { TextEnhancementService, type EnhancedText } from "./text-enhancement.service";
 
 @ApiTags("AI")
 @ApiBearerAuth()
@@ -18,7 +20,8 @@ import {
 export class AiController {
   constructor(
     private readonly aiService: AiService,
-    private readonly insights: ConversationInsightsService
+    private readonly insights: ConversationInsightsService,
+    private readonly enhancement: TextEnhancementService
   ) {}
 
   @Post("suggest")
@@ -43,6 +46,15 @@ export class AiController {
     @Param("conversationId") conversationId: string
   ): Promise<ConversationSummary> {
     return this.insights.summarize(organizationId, conversationId);
+  }
+
+  @Post("enhance")
+  @Permissions("chat:write")
+  @ApiOperation({ summary: "Tidy up the agent's draft before the customer sees it" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  enhance(@Body() dto: EnhanceTextDto): Promise<EnhancedText> {
+    return this.enhancement.enhance(dto.text, dto.tone ?? "professional");
   }
 
   @Post("tags")

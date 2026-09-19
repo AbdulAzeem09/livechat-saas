@@ -39,6 +39,7 @@ import { SendMessageDto } from "./dto/send-message.dto";
 import { UpdateConversationDto } from "./dto/update-conversation.dto";
 import { UpdateTagsDto } from "./dto/update-tags.dto";
 import type { CommerceOrder } from "../apps/integration-hub.service";
+import { RevenueService, type ConversationRevenue } from "../reports/revenue.service";
 import { ConversationsService } from "./conversations.service";
 
 @ApiTags("Conversations")
@@ -46,7 +47,10 @@ import { ConversationsService } from "./conversations.service";
 @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
 @Controller("organizations/:organizationId/conversations")
 export class ConversationsController {
-  constructor(private readonly conversationsService: ConversationsService) {}
+  constructor(
+    private readonly conversationsService: ConversationsService,
+    private readonly revenueService: RevenueService
+  ) {}
 
   @Get()
   @Permissions("chat:read")
@@ -133,6 +137,18 @@ export class ConversationsController {
     @Body() dto: UpdateTagsDto
   ): Promise<ConversationDto> {
     return this.conversationsService.updateTags(organizationId, conversationId, dto.tags);
+  }
+
+  @Get(":conversationId/revenue")
+  @Permissions("chat:read")
+  @ApiOperation({ summary: "What this chat was worth (sales recorded against it)" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "conversationId" })
+  revenue(
+    @Param("organizationId") organizationId: string,
+    @Param("conversationId") conversationId: string
+  ): Promise<ConversationRevenue> {
+    return this.revenueService.forConversation(organizationId, conversationId);
   }
 
   @Get(":conversationId/orders")
