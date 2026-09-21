@@ -114,10 +114,11 @@ export class ConversationInsightsService {
       : [];
     const merged = Array.from(new Set([...existing, ...tags])).slice(0, 20);
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, tags: merged } }
-    });
+    // Set just the tags key in the database. Writing the whole object back would drop
+    // anything another background job (the AI-resolution verdict, say) saved in between.
+    await this.prisma.$executeRaw`UPDATE conversations
+      SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{tags}', ${JSON.stringify(merged)}::jsonb, true)
+      WHERE id = ${conversationId}::uuid`;
 
     return { tags, applied: merged.filter((tag) => !existing.includes(tag)), usedAI };
   }

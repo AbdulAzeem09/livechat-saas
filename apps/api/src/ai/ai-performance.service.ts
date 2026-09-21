@@ -31,7 +31,7 @@ export class AiPerformanceService {
   async markIfAiResolved(organizationId: string, conversationId: string): Promise<boolean> {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, organizationId },
-      select: { metadata: true }
+      select: { id: true }
     });
 
     if (!conversation) {
@@ -53,16 +53,14 @@ export class AiPerformanceService {
     ]);
 
     const resolvedByAi = humanMessages === 0 && botMessages > 0;
-    const metadata =
-      conversation.metadata && typeof conversation.metadata === "object" && !Array.isArray(conversation.metadata)
-        ? (conversation.metadata as Record<string, unknown>)
-        : {};
 
-    await this.prisma.conversation
-      .update({
-        where: { id: conversationId },
-        data: { metadata: { ...metadata, aiResolved: resolvedByAi } }
-      })
+    // Merge inside the database rather than read-modify-write here. Auto-tagging runs on the
+    // same finished chat at the same moment and also edits metadata; two read-modify-writes
+    // race, and whichever saved last would silently drop the other's field.
+    await this.prisma
+      .$executeRaw`UPDATE conversations
+         SET metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{aiResolved}', to_jsonb(${resolvedByAi}::boolean), true)
+         WHERE id = ${conversationId}::uuid AND organization_id = ${organizationId}::uuid`
       .catch(() => undefined);
 
     return resolvedByAi;
