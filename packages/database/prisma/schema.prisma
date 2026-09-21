@@ -386,6 +386,23 @@ model Invitation {
   @@map("invitations")
 }
 
+/** A plain-language rule the AI follows in a particular situation. */
+model AiSkill {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  instruction    String
+  /** When set, the skill is only sent to the model for messages that mention these. */
+  keywords       String[] @default([])
+  isActive       Boolean  @default(true) @map("is_active")
+  position       Int      @default(0) @db.SmallInt
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, isActive])
+  @@map("ai_skills")
+}
+
 /** Visual chatbot: a flow is a set of connected steps the bot walks a visitor through. */
 model BotFlow {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

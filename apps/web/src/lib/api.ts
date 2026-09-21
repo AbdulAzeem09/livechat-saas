@@ -30,6 +30,8 @@ import type {
   Organization,
   OrganizationMember,
   ReportSummary,
+  AiSkill,
+  AiPerformance,
   ConversationRevenue,
   RevenueOverview,
   EnhancedText,
@@ -1656,6 +1658,57 @@ export function enhanceText(
     `/organizations/${organizationId}/conversations/${conversationId}/ai/enhance`,
     { accessToken, method: "POST", body: JSON.stringify(input) }
   );
+}
+
+// ---- AI skills: the rules the assistant follows ----
+
+export function listAiSkills(organizationId: string, accessToken: string): Promise<AiSkill[]> {
+  return apiRequest<AiSkill[]>(`/organizations/${organizationId}/ai/skills`, { accessToken });
+}
+
+export function createAiSkill(
+  organizationId: string,
+  accessToken: string,
+  input: { name: string; instruction: string; keywords?: string[] }
+): Promise<AiSkill> {
+  return apiRequest<AiSkill>(`/organizations/${organizationId}/ai/skills`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateAiSkill(
+  organizationId: string,
+  skillId: string,
+  accessToken: string,
+  input: { name?: string; instruction?: string; keywords?: string[]; isActive?: boolean }
+): Promise<AiSkill> {
+  return apiRequest<AiSkill>(`/organizations/${organizationId}/ai/skills/${skillId}`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteAiSkill(
+  organizationId: string,
+  skillId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(`/organizations/${organizationId}/ai/skills/${skillId}`, {
+    accessToken,
+    method: "DELETE"
+  });
+}
+
+export function aiPerformance(
+  organizationId: string,
+  accessToken: string
+): Promise<AiPerformance> {
+  return apiRequest<AiPerformance>(`/organizations/${organizationId}/ai/performance`, {
+    accessToken
+  });
 }
 
 async function readErrorBody(response: Response): Promise<ApiErrorBody | undefined> {

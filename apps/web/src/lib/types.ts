@@ -662,3 +662,21 @@ export interface EnhancedText {
   usedAI: boolean;
   changed: boolean;
 }
+
+export interface AiSkill {
+  id: string;
+  name: string;
+  instruction: string;
+  keywords: string[];
+  isActive: boolean;
+  position: number;
+}
+
+export interface AiPerformance {
+  resolutions: number;
+  aiChats: number;
+  resolutionRate: number;
+  handedToHuman: number;
+  totalChats: number;
+  periodDays: number;
+}

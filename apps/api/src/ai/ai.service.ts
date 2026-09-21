@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { KnowledgeArticle, Message, MessageVisibility, ParticipantType } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { AiSkillsService } from "./ai-skills.service";
 
 export interface AiSuggestion {
   suggestion: string;
@@ -135,7 +136,8 @@ const HANDOFF_MARKER = "[[HANDOFF]]";
 export class AiService {
   constructor(
     private readonly config: ConfigService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly skills: AiSkillsService
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -345,17 +347,34 @@ export class AiService {
     }
 
     // Standard mode: only answer when the knowledge base covers the question.
-    if (!knowledge) {
+    // The workspace's own rules for this kind of message ("if they ask for a refund, …").
+    const skills = await this.skills.instructionsFor(organizationId, question).catch(() => []);
+    const teamAway = !(await this.isAnyoneAvailable(organizationId));
+
+    // Nobody to answer the question and nothing to answer it from: take a lead instead of
+    // leaving the visitor talking to a wall.
+    if (!knowledge && !skills.length && !teamAway) {
       return { answer: "", confident: false, usedAI: false, model: null, handoff: false };
     }
 
     const system = [
       `You are ${settings.name}, a ${settings.tone} AI receptionist answering website visitors on behalf of this business.`,
-      "Answer the visitor's question using ONLY the business knowledge below. Do NOT use outside knowledge or make anything up.",
-      `If the knowledge does not clearly answer the question, reply with EXACTLY this token and nothing else: ${UNKNOWN_MARKER}`,
+      knowledge
+        ? "Answer the visitor's question using ONLY the business knowledge below. Do NOT use outside knowledge or make anything up."
+        : "You have no business knowledge to answer from, so do not attempt to answer factual questions.",
+      skills.length
+        ? `Follow these rules from the business. They take priority over everything else:\n${skills
+            .map((rule, index) => `${index + 1}. ${rule}`)
+            .join("\n")}`
+        : "",
+      teamAway
+        ? "The team is offline right now. Say so plainly, then ask for the visitor's name and email (or phone) so someone can get back to them, and confirm once they give it."
+        : `If the knowledge does not clearly answer the question, reply with EXACTLY this token and nothing else: ${UNKNOWN_MARKER}`,
       "Otherwise answer directly in 1-4 short, friendly sentences. Do not mention 'the knowledge' or that you are an AI.",
-      `--- BUSINESS KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---`
-    ].join("\n\n");
+      knowledge ? `--- BUSINESS KNOWLEDGE ---\n${knowledge}\n--- END KNOWLEDGE ---` : ""
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const text = await this.callClaude(apiKey, system, `Visitor's question: ${question}`);
     if (text === null || !text || text.includes(UNKNOWN_MARKER)) {
@@ -544,6 +563,15 @@ export class AiService {
   // ---------------------------------------------------------------------------
 
   /** Pull the most relevant published knowledge articles and flatten to text. */
+  /** Is there an agent who could pick this up right now? */
+  private async isAnyoneAvailable(organizationId: string): Promise<boolean> {
+    const online = await this.prisma.userOrganization.count({
+      where: { organizationId, status: "ACTIVE", agentStatus: "ONLINE" }
+    });
+
+    return online > 0;
+  }
+
   private async retrieveKnowledge(organizationId: string, question: string): Promise<string> {
     const words = (question || "")
       .toLowerCase()

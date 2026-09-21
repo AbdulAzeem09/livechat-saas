@@ -149,6 +149,8 @@ This comes before realtime chat so we have a usable UI surface for testing agent
 | AI message improvement | P2 | V5 | Composer assistant |
 | AI conversation summaries | P2 | V5 | Chat history and CRM timeline |
 | AI support automation | P3 | V5 | Bot/automation module |
+| AI agent skills (per-workspace rules) | P2 | V5 | AI module — see `docs/ai-agent.md` |
+| AI resolution reporting | P2 | V5 | AI module — see `docs/ai-agent.md` |
 
 ## Customer Engagement
 

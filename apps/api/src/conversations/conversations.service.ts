@@ -31,6 +31,7 @@ import type { ListConversationsQuery } from "./dto/list-conversations.query";
 import type { ListMessagesQuery } from "./dto/list-messages.query";
 import type { SendMessageDto } from "./dto/send-message.dto";
 import type { UpdateConversationDto } from "./dto/update-conversation.dto";
+import { AiPerformanceService } from "../ai/ai-performance.service";
 import { ConversationInsightsService } from "../ai/conversation-insights.service";
 import { IntegrationHubService, type CommerceOrder } from "../apps/integration-hub.service";
 import { ConversationsGateway } from "./conversations.gateway";
@@ -44,7 +45,8 @@ export class ConversationsService {
     private readonly gateway: ConversationsGateway,
     private readonly fileStorage: FileStorageService,
     private readonly insights: ConversationInsightsService,
-    private readonly integrations: IntegrationHubService
+    private readonly integrations: IntegrationHubService,
+    private readonly aiPerformance: AiPerformanceService
   ) {}
 
   async listConversations(
@@ -243,6 +245,19 @@ export class ConversationsService {
     })().catch(() => undefined);
   }
 
+  /** Note whether the assistant closed this one without anybody from the team. */
+  private recordAiResolution(
+    organizationId: string,
+    conversationId: string,
+    status: ConversationStatus | undefined
+  ): void {
+    if (status !== ConversationStatus.RESOLVED && status !== ConversationStatus.CLOSED) {
+      return;
+    }
+
+    void this.aiPerformance.markIfAiResolved(organizationId, conversationId).catch(() => undefined);
+  }
+
   /** Label a finished chat by topic so Archives and the tag report stay useful. */
   private autoTagWhenFinished(
     organizationId: string,
@@ -279,6 +294,7 @@ export class ConversationsService {
     const response = this.mapConversation(conversation);
 
     this.autoTagWhenFinished(organizationId, conversationId, dto.status);
+    this.recordAiResolution(organizationId, conversationId, dto.status);
     this.syncContactWhenFinished(organizationId, conversationId, dto.status);
     this.gateway.emitConversationUpdated(response);
     return response;

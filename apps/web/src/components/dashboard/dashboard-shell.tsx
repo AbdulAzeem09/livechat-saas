@@ -68,7 +68,12 @@ import {
   Zap
 } from "lucide-react";
 import {
+  aiPerformance,
   assignConversation as assignConversationRequest,
+  createAiSkill,
+  deleteAiSkill,
+  listAiSkills,
+  updateAiSkill,
   cancelSubscription as cancelSubscriptionRequest,
   convertConversationToTicket as convertConversationToTicketRequest,
   listInvoices,
@@ -183,6 +188,8 @@ import { playChime, primeAudio, requestNotificationPermission, showBrowserNotifi
 import type { VoiceGender } from "@/lib/notify";
 import { clearSession, readSession, type StoredSession } from "@/lib/session";
 import type {
+  AiPerformance,
+  AiSkill,
   ConversationRevenue,
   RevenueOverview,
   ReportSchedule,
@@ -682,6 +689,7 @@ const secondaryNav: Record<ScreenKey, SecondaryItem[]> = {
     { label: "Chatbots" },
     { label: "Flow builder", badge: "New" },
     { label: "Knowledge hub" },
+    { label: "AI skills", badge: "New" },
     { label: "Canned responses" },
     { label: "Routing rules" },
     { label: "Workflows", badge: "Beta" }
@@ -3601,6 +3609,14 @@ export function DashboardShell() {
                 />
               )}
 
+              {activeScreen === "automate" && activeSecondary === "AI skills" && (
+                <AiSkillsScreen
+                  accessToken={session?.accessToken ?? null}
+                  onAction={handleAction}
+                  organizationId={activeOrganization?.id ?? null}
+                />
+              )}
+
               {activeScreen === "automate" && activeSecondary === "Canned responses" && (
                 <CannedResponsesManager
                   cannedResponses={cannedResponses}
@@ -3651,6 +3667,7 @@ export function DashboardShell() {
                 activeSecondary !== "Canned responses" &&
                 activeSecondary !== "Knowledge hub" &&
                 activeSecondary !== "Flow builder" &&
+                activeSecondary !== "AI skills" &&
                 activeSecondary !== "Chatbots" && (
                   <AutomateScreen
                     heading={activeSecondary}
@@ -7462,6 +7479,284 @@ function CannedResponsesManager({
               </div>
             ))
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Rules people can start from, so the screen is never an empty box. */
+const SKILL_EXAMPLES: Array<{ name: string; instruction: string; keywords: string[] }> = [
+  {
+    name: "Refund requests",
+    instruction:
+      "Never promise a refund. Take the order number, say the team will check it today, and hand the chat to a person.",
+    keywords: ["refund", "money back", "return"]
+  },
+  {
+    name: "Price questions",
+    instruction:
+      "Give the price from the knowledge base. If they hesitate, mention that there is a free trial and offer to book a call.",
+    keywords: ["price", "cost", "how much", "discount"]
+  },
+  {
+    name: "Where is my order",
+    instruction:
+      "Ask for the order number first. If they give one, hand the chat to a person with the number in the notes.",
+    keywords: ["order", "delivery", "shipped", "tracking"]
+  },
+  {
+    name: "Complaints",
+    instruction:
+      "Apologise once, don't argue, don't explain policy. Take their phone number and hand the chat to a person immediately.",
+    keywords: ["angry", "terrible", "complain", "worst", "unacceptable"]
+  }
+];
+
+/**
+ * Skills: the rules the assistant follows, written the way you would brief a new colleague.
+ * A rule with keywords is only used for messages that mention them, so a shop's ten rules
+ * don't all compete for the model's attention on every message.
+ */
+function AiSkillsScreen({
+  accessToken,
+  onAction,
+  organizationId
+}: {
+  accessToken: string | null;
+  onAction: (message: string) => void;
+  organizationId: string | null;
+}) {
+  const [skills, setSkills] = useState<AiSkill[]>([]);
+  const [performance, setPerformance] = useState<AiPerformance | null>(null);
+  const [name, setName] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [keywords, setKeywords] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    Promise.all([
+      listAiSkills(organizationId, accessToken),
+      aiPerformance(organizationId, accessToken).catch(() => null)
+    ])
+      .then(([loadedSkills, loadedPerformance]) => {
+        if (cancelled) return;
+        setSkills(loadedSkills);
+        setPerformance(loadedPerformance);
+      })
+      .catch((caughtError: unknown) => {
+        if (!cancelled) {
+          setError(caughtError instanceof Error ? caughtError.message : "Could not load the rules");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId]);
+
+  async function add(event: FormEvent) {
+    event.preventDefault();
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const created = await createAiSkill(organizationId, accessToken, {
+        name: name.trim(),
+        instruction: instruction.trim(),
+        keywords: keywords.split(",").map((word) => word.trim()).filter(Boolean)
+      });
+      setSkills((current) => [...current, created]);
+      setName("");
+      setInstruction("");
+      setKeywords("");
+      onAction(`The assistant learned "${created.name}".`);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save that rule");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function toggle(skill: AiSkill) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    try {
+      const updated = await updateAiSkill(organizationId, skill.id, accessToken, {
+        isActive: !skill.isActive
+      });
+      setSkills((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not change that rule");
+    }
+  }
+
+  async function remove(skill: AiSkill) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    try {
+      await deleteAiSkill(organizationId, skill.id, accessToken);
+      setSkills((current) => current.filter((item) => item.id !== skill.id));
+      onAction("Rule removed.");
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not remove that rule");
+    }
+  }
+
+  function useExample(example: (typeof SKILL_EXAMPLES)[number]) {
+    setName(example.name);
+    setInstruction(example.instruction);
+    setKeywords(example.keywords.join(", "));
+  }
+
+  return (
+    <div className="min-h-full bg-white px-6 py-6 text-black">
+      <h2 className="text-lg font-bold">What the assistant should do</h2>
+      <p className="mb-5 mt-1 max-w-2xl text-sm text-slate-600">
+        Write rules the way you would brief a new colleague. The assistant follows them before
+        anything else — so it never promises a refund, always takes an order number, or hands a
+        complaint straight to a person.
+      </p>
+
+      {performance ? (
+        <div className="mb-6 grid gap-3 md:grid-cols-4">
+          {[
+            ["Finished on its own", String(performance.resolutions)],
+            ["Chats it answered", String(performance.aiChats)],
+            ["Done without a person", `${performance.resolutionRate}%`],
+            ["Handed to a person", String(performance.handedToHuman)]
+          ].map(([label, value]) => (
+            <div className="rounded-xl border border-slate-200 p-4" key={label}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                {label}
+              </p>
+              <p className="mt-1 text-2xl font-black">{value}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-2">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">Loading…</p>
+          ) : skills.length === 0 ? (
+            <p className="rounded-lg border border-slate-200 p-5 text-sm text-slate-600">
+              No rules yet. Add one on the right — or start from an example below.
+            </p>
+          ) : (
+            skills.map((skill) => (
+              <div
+                className={cn(
+                  "rounded-lg border p-4",
+                  skill.isActive ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-70"
+                )}
+                key={skill.id}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-bold">{skill.name}</p>
+                  <span className="flex gap-2">
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold hover:bg-slate-50"
+                      onClick={() => void toggle(skill)}
+                      type="button"
+                    >
+                      {skill.isActive ? "Switch off" : "Switch on"}
+                    </button>
+                    <button
+                      className="rounded-md px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                      onClick={() => void remove(skill)}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-slate-700">{skill.instruction}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {skill.keywords.length
+                    ? `Used when the message mentions: ${skill.keywords.join(", ")}`
+                    : "Used on every message"}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="grid gap-4">
+          <form className="grid gap-2 rounded-lg border border-slate-200 p-4" onSubmit={(event) => void add(event)}>
+            <p className="text-sm font-bold">Add a rule</p>
+            <label className="grid gap-1 text-xs font-semibold text-slate-600">
+              Name
+              <input
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Refund requests"
+                value={name}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-semibold text-slate-600">
+              What should it do?
+              <textarea
+                className="min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder="Don't promise a refund. Take the order number and hand the chat to a person."
+                value={instruction}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-semibold text-slate-600">
+              Only when they mention (optional)
+              <input
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                onChange={(event) => setKeywords(event.target.value)}
+                placeholder="refund, money back, return"
+                value={keywords}
+              />
+            </label>
+            <button
+              className="justify-self-start rounded-md bg-[#0067ff] px-4 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-50"
+              disabled={isSaving || !name.trim() || instruction.trim().length < 5}
+              type="submit"
+            >
+              {isSaving ? "Saving…" : "Add rule"}
+            </button>
+          </form>
+
+          <div className="rounded-lg border border-slate-200 p-4">
+            <p className="text-sm font-bold">Start from an example</p>
+            <div className="mt-2 grid gap-2">
+              {SKILL_EXAMPLES.map((example) => (
+                <button
+                  className="rounded-md border border-slate-200 px-3 py-2 text-left text-xs hover:border-[#0067ff] hover:bg-[#eef3ff]"
+                  key={example.name}
+                  onClick={() => useExample(example)}
+                  type="button"
+                >
+                  <span className="block font-bold">{example.name}</span>
+                  <span className="mt-0.5 block text-slate-500">{example.instruction}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
