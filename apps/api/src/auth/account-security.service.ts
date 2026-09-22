@@ -132,7 +132,7 @@ export class AccountSecurityService {
     });
 
     const label = encodeURIComponent(email);
-    const issuer = encodeURIComponent("LiveChat");
+    const issuer = encodeURIComponent("Chatme");
 
     return {
       secret,

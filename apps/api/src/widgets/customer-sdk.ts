@@ -8,7 +8,7 @@
  * Served from GET /api/v1/customer-sdk.js.
  */
 export function buildCustomerSdk(): string {
-  return `/* LiveChat Customer SDK */
+  return `/* Chatme Customer SDK */
 (function (global) {
   "use strict";
 

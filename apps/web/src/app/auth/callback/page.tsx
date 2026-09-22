@@ -60,7 +60,7 @@ export default function AuthCallbackPage() {
             <p className="text-lg font-bold">Sign-in failed</p>
             <p className="mt-2 text-sm text-white/60">{error}</p>
             <a
-              className="mt-5 inline-block rounded-lg bg-[#FF5100] px-5 py-2.5 text-sm font-bold hover:bg-[#e64a00]"
+              className="mt-5 inline-block rounded-lg bg-[#0067FF] px-5 py-2.5 text-sm font-bold hover:bg-[#0050C7]"
               href="/login"
             >
               Back to login

@@ -24,7 +24,7 @@ export default function ResourcesPage() {
       <MarketingHeader />
 
       <section className="mx-auto max-w-4xl px-6 py-16 text-center">
-        <p className="text-sm font-bold uppercase tracking-wide text-[#FF5100]">Resources</p>
+        <p className="text-sm font-bold uppercase tracking-wide text-[#0067FF]">Resources</p>
         <h1 className="mx-auto mt-3 max-w-2xl text-4xl font-bold md:text-5xl">Learn to chat like a pro</h1>
         <p className="mx-auto mt-4 max-w-lg text-slate-500">
           Guides, tutorials, and templates to get more from every conversation.
@@ -34,12 +34,12 @@ export default function ResourcesPage() {
       <section className="mx-auto max-w-6xl px-6 pb-8">
         <div className="grid items-center gap-8 rounded-2xl bg-[#111214] p-8 text-white md:grid-cols-2 md:p-12">
           <div>
-            <span className="rounded-full bg-[#FF5100] px-3 py-1 text-xs font-bold">{FEATURED.tag}</span>
+            <span className="rounded-full bg-[#0067FF] px-3 py-1 text-xs font-bold">{FEATURED.tag}</span>
             <h2 className="mt-4 text-2xl font-bold md:text-3xl">{FEATURED.title}</h2>
             <p className="mt-3 text-sm text-white/60">{FEATURED.copy}</p>
             <div className="mt-5 flex items-center gap-4">
               <Link
-                className="inline-flex items-center gap-2 rounded-lg bg-[#FF5100] px-5 py-2.5 text-sm font-bold hover:bg-[#e64a00]"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#0067FF] px-5 py-2.5 text-sm font-bold hover:bg-[#0050C7]"
                 href="/register"
               >
                 Read the guide <ArrowRight className="h-4 w-4" aria-hidden />
@@ -47,17 +47,17 @@ export default function ResourcesPage() {
               <span className="text-xs text-white/40">{FEATURED.read}</span>
             </div>
           </div>
-          <div className="hidden h-48 rounded-xl bg-gradient-to-br from-[#FF5100]/30 to-transparent md:block" />
+          <div className="hidden h-48 rounded-xl bg-gradient-to-br from-[#0067FF]/30 to-transparent md:block" />
         </div>
       </section>
 
       <section className="mx-auto grid max-w-6xl gap-6 px-6 pb-20 md:grid-cols-2 lg:grid-cols-3">
         {POSTS.map((post) => (
           <article className="rounded-2xl border border-slate-200 p-6 transition hover:shadow-md" key={post.title}>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff0e8]">
-              <post.icon className="h-5 w-5 text-[#FF5100]" aria-hidden />
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF3FF]">
+              <post.icon className="h-5 w-5 text-[#0067FF]" aria-hidden />
             </span>
-            <p className="mt-4 text-xs font-bold uppercase tracking-wide text-[#FF5100]">{post.tag}</p>
+            <p className="mt-4 text-xs font-bold uppercase tracking-wide text-[#0067FF]">{post.tag}</p>
             <h3 className="mt-2 text-lg font-bold leading-snug">{post.title}</h3>
             <p className="mt-3 text-xs text-slate-400">{post.read}</p>
           </article>

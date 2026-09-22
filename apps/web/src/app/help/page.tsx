@@ -48,7 +48,7 @@ export default function HelpPage() {
       <MarketingHeader />
 
       <section className="bg-[#111214] px-6 py-16 text-center text-white">
-        <p className="text-sm font-bold uppercase tracking-wide text-[#FF5100]">Help center</p>
+        <p className="text-sm font-bold uppercase tracking-wide text-[#0067FF]">Help center</p>
         <h1 className="mx-auto mt-3 max-w-2xl text-4xl font-bold md:text-5xl">How can we help?</h1>
         <div className="mx-auto mt-6 flex max-w-md items-center gap-2 rounded-xl bg-white px-4 py-3 text-slate-500">
           <Search className="h-5 w-5" aria-hidden />
@@ -63,8 +63,8 @@ export default function HelpPage() {
       <section className="mx-auto grid max-w-6xl gap-6 px-6 py-16 md:grid-cols-2 lg:grid-cols-3">
         {CATEGORIES.map((cat) => (
           <div className="rounded-2xl border border-slate-200 p-6 transition hover:shadow-md" key={cat.title}>
-            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#fff0e8]">
-              <cat.icon className="h-5 w-5 text-[#FF5100]" aria-hidden />
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#EEF3FF]">
+              <cat.icon className="h-5 w-5 text-[#0067FF]" aria-hidden />
             </span>
             <h3 className="mt-4 text-lg font-bold">{cat.title}</h3>
             <p className="mt-2 text-sm text-slate-500">{cat.desc}</p>
@@ -80,7 +80,7 @@ export default function HelpPage() {
               <summary className="cursor-pointer list-none text-base font-semibold marker:content-none">
                 <span className="flex items-center justify-between gap-4">
                   {item.q}
-                  <span className="text-[#FF5100] transition group-open:rotate-45">+</span>
+                  <span className="text-[#0067FF] transition group-open:rotate-45">+</span>
                 </span>
               </summary>
               <p className="mt-3 text-sm text-slate-600">{item.a}</p>
@@ -92,7 +92,7 @@ export default function HelpPage() {
           <h3 className="text-lg font-bold">Still need help?</h3>
           <p className="mt-2 text-sm text-slate-500">Our team is one chat away — click the bubble in the corner.</p>
           <Link
-            className="mt-5 inline-block rounded-lg bg-[#FF5100] px-6 py-3 text-sm font-bold text-white hover:bg-[#e64a00]"
+            className="mt-5 inline-block rounded-lg bg-[#0067FF] px-6 py-3 text-sm font-bold text-white hover:bg-[#0050C7]"
             href="/register"
           >
             Start a free account

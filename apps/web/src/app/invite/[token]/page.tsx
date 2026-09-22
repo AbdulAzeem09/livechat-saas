@@ -64,12 +64,12 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
 
   const loginHref = `/login?next=${encodeURIComponent(`/invite/${token}`)}`;
   const inputClass =
-    "w-full rounded-lg border border-white/15 bg-[#0b0b0f] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#FF5100]";
+    "w-full rounded-lg border border-white/15 bg-[#0b0b0f] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#0067FF]";
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#0b0b0f] px-6 text-white">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#141418] p-8 text-center">
-        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#FF5100] text-xl font-bold">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#0067FF] text-xl font-bold">
           LC
         </span>
 
@@ -98,7 +98,7 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
             {hasSession ? (
               <>
                 <button
-                  className="mt-6 w-full rounded-lg bg-[#FF5100] px-5 py-3 text-sm font-bold hover:bg-[#e64a00] disabled:opacity-60"
+                  className="mt-6 w-full rounded-lg bg-[#0067FF] px-5 py-3 text-sm font-bold hover:bg-[#0050C7] disabled:opacity-60"
                   disabled={accepting}
                   onClick={() => void handleAccept()}
                   type="button"
@@ -148,7 +148,7 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
                     />
                   </label>
                   <button
-                    className="mt-2 w-full rounded-lg bg-[#FF5100] px-5 py-3 text-sm font-bold hover:bg-[#e64a00] disabled:opacity-60"
+                    className="mt-2 w-full rounded-lg bg-[#0067FF] px-5 py-3 text-sm font-bold hover:bg-[#0050C7] disabled:opacity-60"
                     disabled={accepting}
                     type="submit"
                   >
@@ -169,7 +169,7 @@ export default function InviteAcceptPage({ params }: { params: Promise<{ token: 
             <h1 className="mt-6 text-xl font-bold">Invite unavailable</h1>
             <p className="mt-2 text-sm text-white/60">{preview?.reason ?? "This invite is not valid."}</p>
             <Link
-              className="mt-6 inline-block rounded-lg bg-[#FF5100] px-5 py-2.5 text-sm font-bold hover:bg-[#e64a00]"
+              className="mt-6 inline-block rounded-lg bg-[#0067FF] px-5 py-2.5 text-sm font-bold hover:bg-[#0050C7]"
               href="/login"
             >
               Go to login

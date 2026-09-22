@@ -7,7 +7,7 @@ import { CreateGoalDto } from "./dto/create-goal.dto";
 import { UpdateCampaignDto } from "./dto/update-campaign.dto";
 import { UpdateGoalDto } from "./dto/update-goal.dto";
 
-/** Default campaigns seeded for a brand-new workspace (mirrors LiveChat defaults). */
+/** Default campaigns seeded for a brand-new workspace (mirrors Chatme defaults). */
 const DEFAULT_CAMPAIGNS: Array<Omit<CreateCampaignDto, "name"> & { name: string; displayedCount: number; chatsCount: number }> = [
   { name: "Exit Intent Campaign", type: "recurring", triggerType: "exit_intent", triggerValue: "", message: "Wait! Before you go — can we help?", displayedCount: 50, chatsCount: 0 },
   { name: "Offer discount on your checkout page", type: "recurring", triggerType: "page_visit", triggerValue: "/checkout", message: "Use code SAVE10 for 10% off your order!", displayedCount: 0, chatsCount: 0 },

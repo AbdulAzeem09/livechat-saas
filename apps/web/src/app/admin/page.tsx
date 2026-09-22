@@ -59,7 +59,7 @@ export default function AdminPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Platform Admin</h1>
-            <p className="text-sm text-white/50">All client accounts across your LiveChat SaaS.</p>
+            <p className="text-sm text-white/50">All client accounts across your Chatme.</p>
           </div>
           <Link className="rounded-lg border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/5" href="/dashboard">
             Dashboard

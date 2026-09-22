@@ -113,7 +113,7 @@ export class WidgetsService {
         secretHash: this.hashToken(this.generateWidgetSecret()),
         welcomeMessage: "Hi there. How can we help?",
         offlineMessage: "Leave a message and the team will reply soon.",
-        theme: { accentColor: "#ff5a00", position: "right" }
+        theme: { accentColor: "#0067FF", position: "right" }
       }
     });
 
@@ -952,7 +952,7 @@ export class WidgetsService {
         welcomeMessage: "Hi there. How can we help?",
         offlineMessage: "Leave a message and the team will reply soon.",
         theme: {
-          accentColor: "#ff5a00",
+          accentColor: "#0067FF",
           position: "right"
         }
       }
@@ -1266,7 +1266,7 @@ export class WidgetsService {
       welcomeMessage: widget.welcomeMessage ?? "Hi there. How can we help?",
       offlineMessage: widget.offlineMessage ?? "Leave a message and the team will reply soon.",
       theme: {
-        accentColor: typeof theme.accentColor === "string" ? theme.accentColor : "#ff5a00",
+        accentColor: typeof theme.accentColor === "string" ? theme.accentColor : "#0067FF",
         position: theme.position === "left" ? "left" : "right"
       },
       preChatEnabled: theme.preChatEnabled === true,
@@ -1569,7 +1569,7 @@ function buildWidgetScript(): string {
   }
 
   if (!widgetKey || !currentScript || !currentScript.src) {
-    console.warn("[LiveChat SaaS] Missing data-widget-key.");
+    console.warn("[Chatme] Missing data-widget-key.");
     return;
   }
 
@@ -1619,7 +1619,7 @@ function buildWidgetScript(): string {
     '.lcw-open .lcw-panel{display:flex;flex-direction:column}.lcw-open .lcw-launcher{display:none}' +
     '.lcw-panel .lcw-home,.lcw-panel .lcw-chat{display:none;flex-direction:column;height:100%;min-height:0}' +
     '.lcw-panel .lcw-home{display:flex}.lcw-panel.lcw-chat-active .lcw-home{display:none}.lcw-panel.lcw-chat-active .lcw-chat{display:flex}' +
-    '.lcw-hero{background:linear-gradient(165deg,var(--lcw-accent,#ff5a00),#1b1b1e 66%);padding:20px 22px 30px;position:relative}' +
+    '.lcw-hero{background:linear-gradient(165deg,var(--lcw-accent,#0067FF),#1b1b1e 66%);padding:20px 22px 30px;position:relative}' +
     '.lcw-min{position:absolute;top:14px;right:16px;height:26px;width:26px;border:0;border-radius:8px;background:rgba(255,255,255,.16);color:#fff;cursor:pointer;font-size:15px;line-height:1}' +
     '.lcw-hero-title{font-size:25px;font-weight:800;line-height:1.15;margin-top:30px;max-width:15ch;text-transform:uppercase}' +
     '.lcw-home-body{flex:1;overflow:auto;padding:14px}' +
@@ -1629,17 +1629,17 @@ function buildWidgetScript(): string {
     '.lcw-dot{position:absolute;right:-1px;top:-1px;height:10px;width:10px;border-radius:50%;background:#22c55e;border:2px solid #2a2a2f}' +
     '.lcw-brand-name{font-size:13px;font-weight:700}.lcw-brand-time{font-size:11px;color:#8a8a92}' +
     '.lcw-brand-msg{font-size:14px;color:#e6e6ea;margin:12px 0 14px;line-height:1.45}' +
-    '.lcw-letschat{width:100%;border:0;border-radius:12px;background:var(--lcw-accent,#ffd21e);color:#111;font-weight:800;font-size:15px;padding:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}' +
+    '.lcw-letschat{width:100%;border:0;border-radius:12px;background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);font-weight:800;font-size:15px;padding:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}' +
     '.lcw-tabs{display:flex;border-top:1px solid #2c2c31}.lcw-tab{flex:1;background:none;border:0;color:#8a8a92;padding:11px;cursor:pointer;font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}.lcw-tab.on{color:#fff}.lcw-tab b{font-size:17px;font-weight:400}' +
     '.lcw-chead{display:flex;align-items:center;gap:8px;padding:12px 14px}.lcw-icbtn{height:30px;width:30px;border:0;border-radius:8px;background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font-size:14px}' +
     '.lcw-abar{display:flex;align-items:center;gap:10px;background:#26262b;margin:0 14px;padding:10px 12px;border-radius:12px}.lcw-agent-name{font-size:13px;font-weight:700}.lcw-agent-role{font-size:11px;color:#9a9aa2}' +
     '.lcw-messages{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}' +
     '.lcw-agent-tag{align-self:flex-start;display:flex;align-items:center;gap:6px;margin:6px 0 -2px;font-size:11px;color:#9a9aa2}.lcw-agent-photo{width:18px;height:18px;border-radius:50%;object-fit:cover;flex:none}.lcw-agent-initial{display:flex;align-items:center;justify-content:center;background:#3a3a42;color:#fff;font-size:10px;font-weight:700}' +
-    '.lcw-msg{max-width:82%;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.lcw-agent{align-self:flex-start;background:#2f2f36;color:#fff;border-bottom-left-radius:5px}.lcw-visitor{align-self:flex-end;background:var(--lcw-accent,#ffd21e);color:#111;border-bottom-right-radius:5px}.lcw-system{align-self:center;background:transparent;color:#8a8a92;font-size:12px}' +
-    '.lcw-greet{align-self:stretch;background:#2f2f36;border-radius:14px;padding:12px}.lcw-greet-emoji{background:#f3f4f6;border-radius:10px;text-align:center;font-size:36px;padding:16px}.lcw-greet-txt{font-size:13px;color:#e6e6ea;margin-top:10px}.lcw-quick{display:flex;gap:8px;margin-top:10px}.lcw-q{border:0;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer}.lcw-q1{background:var(--lcw-accent,#ffd21e);color:#111}.lcw-q2{background:#3a3a42;color:#dcdce2}' +
-    '.lcw-form{display:flex;gap:8px;align-items:flex-end;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:18px;padding:10px 14px;font-size:13px;outline:none;background:#26262b;color:#fff;font-family:inherit;line-height:1.4;resize:none;max-height:96px;overflow-y:auto}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#ffd21e)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#ffd21e);border-radius:50%;background:transparent;color:var(--lcw-accent,#ffd21e);cursor:pointer;font-weight:900;font-size:16px}' +
-    '.lcw-attach{height:38px;width:38px;flex:none;border:1px solid #3a3a42;border-radius:50%;background:transparent;color:#8a8a92;cursor:pointer;font-size:15px}.lcw-attach:hover{color:#fff;border-color:var(--lcw-accent,#ffd21e)}.lcw-file{display:block;color:inherit;text-decoration:underline;word-break:break-all}.lcw-file-img{display:block;max-width:180px;border-radius:10px;margin-top:6px}' +
-    '.lcw-launcher{height:60px;width:60px;border:0;border-radius:50%;background:var(--lcw-accent,#ff5a00);color:#fff;box-shadow:0 16px 40px rgba(0,0,0,.3);cursor:pointer;font-size:26px}.lcw-powered{font-size:10px;color:#6b6b72;text-align:center;padding:8px}' +
+    '.lcw-msg{max-width:82%;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.lcw-agent{align-self:flex-start;background:#2f2f36;color:#fff;border-bottom-left-radius:5px}.lcw-visitor{align-self:flex-end;background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);border-bottom-right-radius:5px}.lcw-system{align-self:center;background:transparent;color:#8a8a92;font-size:12px}' +
+    '.lcw-greet{align-self:stretch;background:#2f2f36;border-radius:14px;padding:12px}.lcw-greet-emoji{background:#f3f4f6;border-radius:10px;text-align:center;font-size:36px;padding:16px}.lcw-greet-txt{font-size:13px;color:#e6e6ea;margin-top:10px}.lcw-quick{display:flex;gap:8px;margin-top:10px}.lcw-q{border:0;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer}.lcw-q1{background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff)}.lcw-q2{background:#3a3a42;color:#dcdce2}' +
+    '.lcw-form{display:flex;gap:8px;align-items:flex-end;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:18px;padding:10px 14px;font-size:13px;outline:none;background:#26262b;color:#fff;font-family:inherit;line-height:1.4;resize:none;max-height:96px;overflow-y:auto}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#0067FF)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#0067FF);border-radius:50%;background:transparent;color:var(--lcw-accent,#0067FF);cursor:pointer;font-weight:900;font-size:16px}' +
+    '.lcw-attach{height:38px;width:38px;flex:none;border:1px solid #3a3a42;border-radius:50%;background:transparent;color:#8a8a92;cursor:pointer;font-size:15px}.lcw-attach:hover{color:#fff;border-color:var(--lcw-accent,#0067FF)}.lcw-file{display:block;color:inherit;text-decoration:underline;word-break:break-all}.lcw-file-img{display:block;max-width:180px;border-radius:10px;margin-top:6px}' +
+    '.lcw-launcher{height:60px;width:60px;border:0;border-radius:50%;background:var(--lcw-accent,#0067FF);color:#fff;box-shadow:0 16px 40px rgba(0,0,0,.3);cursor:pointer;font-size:26px}.lcw-powered{font-size:10px;color:#6b6b72;text-align:center;padding:8px}' +
     '</style>' +
     '<div class="lcw-root">' +
       '<section class="lcw-panel" aria-label="Live chat">' +
@@ -1651,14 +1651,14 @@ function buildWidgetScript(): string {
             '<button class="lcw-letschat" type="button">Let’s chat ➤</button>' +
           '</div></div>' +
           '<div class="lcw-tabs"><button class="lcw-tab lcw-tab-home on" type="button"><b>\u{1F3E0}</b>Home</button><button class="lcw-tab lcw-tab-chat" type="button"><b>\u{1F4AC}</b>Chat</button></div>' +
-          '<div class="lcw-powered">Powered by LiveChat</div>' +
+          '<div class="lcw-powered">Powered by Chatme</div>' +
         '</div>' +
         '<div class="lcw-chat">' +
           '<header class="lcw-chead"><button class="lcw-back lcw-icbtn" type="button" aria-label="Back">&#8592;</button><div style="flex:1"></div><button class="lcw-close lcw-icbtn" type="button" aria-label="Close">&#10005;</button></header>' +
           '<div class="lcw-abar"><div class="lcw-av"><span class="lcw-agent-ini">LC</span><span class="lcw-dot" style="border-color:#26262b"></span></div><div><div class="lcw-agent-name">Support</div><div class="lcw-agent-role">We reply in a few minutes</div></div></div>' +
           '<div class="lcw-messages"></div>' +
           '<form class="lcw-form"><input class="lcw-file-input" type="file" hidden /><button class="lcw-attach" type="button" aria-label="Attach a file">📎</button><textarea class="lcw-input" autocomplete="off" rows="1" placeholder="Write a message..."></textarea><button class="lcw-send" type="submit">➤</button></form>' +
-          '<div class="lcw-powered">Powered by LiveChat</div>' +
+          '<div class="lcw-powered">Powered by Chatme</div>' +
         '</div>' +
       '</section>' +
       '<button class="lcw-launcher" type="button" aria-label="Open chat">\u{1F4AC}</button>' +
@@ -1753,7 +1753,7 @@ function buildWidgetScript(): string {
       var b = document.createElement("button");
       b.type = "button";
       b.textContent = opt.label;
-      b.style.cssText = "text-align:left;border:1px solid var(--lcw-accent,#ffd21e);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;font-size:13px;cursor:pointer";
+      b.style.cssText = "text-align:left;border:1px solid var(--lcw-accent,#0067FF);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;font-size:13px;cursor:pointer";
       b.addEventListener("click", function () { wrap.remove(); selectMenuOption(opt); });
       wrap.appendChild(b);
     });
@@ -1834,7 +1834,7 @@ function buildWidgetScript(): string {
         html += '<input data-field="' + index + '" type="' + inputType + '" placeholder="' + escapeAttr(field.label) + star + '" style="' + fieldStyle + '"' + req + ' />';
       }
     });
-    html += '<button type="submit" style="width:100%;padding:11px;border:0;border-radius:9px;background:var(--lcw-accent,#ffd21e);color:#111;font-weight:800;cursor:pointer">' + t("startChat") + '</button>';
+    html += '<button type="submit" style="width:100%;padding:11px;border:0;border-radius:9px;background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);font-weight:800;cursor:pointer">' + t("startChat") + '</button>';
     wrap.innerHTML = html;
     messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
@@ -1886,7 +1886,7 @@ function buildWidgetScript(): string {
     wrap.innerHTML =
       '<div style="font-weight:700;margin-bottom:10px">' + escapeAttr(msg) + '</div>' +
       '<textarea class="lcw-post-note" placeholder="Leave us a note (optional)" rows="2" style="' + fieldStyle + '"></textarea>' +
-      '<button type="submit" style="width:100%;padding:11px;border:0;border-radius:9px;background:var(--lcw-accent,#ffd21e);color:#111;font-weight:800;cursor:pointer">Send</button>';
+      '<button type="submit" style="width:100%;padding:11px;border:0;border-radius:9px;background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);font-weight:800;cursor:pointer">Send</button>';
     messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
     wrap.addEventListener("submit", function (event) {
@@ -1961,10 +1961,32 @@ function buildWidgetScript(): string {
     submitComposer();
   });
 
+  /** Black or white, whichever can actually be read on the given background. */
+  function readableOn(hex) {
+    var clean = String(hex || "").replace("#", "");
+    if (clean.length === 3) {
+      clean = clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2];
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(clean)) {
+      return "#ffffff";
+    }
+    var channel = function (start) {
+      var value = parseInt(clean.slice(start, start + 2), 16) / 255;
+      return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    };
+    var luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+
+    return luminance > 0.45 ? "#111111" : "#ffffff";
+  }
+
   fetchJson("/widgets/public/" + encodeURIComponent(widgetKey) + "/config")
     .then(function (config) {
       state.config = config;
-      container.style.setProperty("--lcw-accent", config.theme && config.theme.accentColor ? config.theme.accentColor : "#ff5a00");
+      var accent = config.theme && config.theme.accentColor ? config.theme.accentColor : "#0067FF";
+      container.style.setProperty("--lcw-accent", accent);
+      // Text sitting on the accent must stay readable whatever colour the workspace picked —
+      // black on a dark blue is as unreadable as white on a yellow.
+      container.style.setProperty("--lcw-on-accent", readableOn(accent));
       if (config.theme && config.theme.position === "left") {
         container.style.left = "20px";
         container.style.right = "auto";
@@ -2034,8 +2056,8 @@ function buildWidgetScript(): string {
     // The look is picked in Settings; each one is a different teaser style, same behaviour.
     var looks = {
       bubble: "background:#fff;color:#111;border-radius:14px;padding:12px 30px 12px 14px;box-shadow:0 12px 34px rgba(0,0,0,.25)",
-      card: "background:#fff;color:#111;border-radius:12px;padding:14px 30px 14px 14px;border-left:4px solid var(--lcw-accent,#ff5a00);box-shadow:0 12px 34px rgba(0,0,0,.2)",
-      banner: "background:var(--lcw-accent,#ff5a00);color:#fff;border-radius:10px;padding:12px 30px 12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.25);font-weight:700",
+      card: "background:#fff;color:#111;border-radius:12px;padding:14px 30px 14px 14px;border-left:4px solid var(--lcw-accent,#0067FF);box-shadow:0 12px 34px rgba(0,0,0,.2)",
+      banner: "background:var(--lcw-accent,#0067FF);color:#fff;border-radius:10px;padding:12px 30px 12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.25);font-weight:700",
       pill: "background:#fff;color:#111;border-radius:999px;padding:10px 32px 10px 18px;box-shadow:0 10px 26px rgba(0,0,0,.2)",
       dark: "background:#1f1f23;color:#fff;border-radius:14px;padding:12px 30px 12px 14px;box-shadow:0 12px 34px rgba(0,0,0,.35)",
       avatar: "background:#fff;color:#111;border-radius:14px;padding:12px 30px 12px 46px;box-shadow:0 12px 34px rgba(0,0,0,.25)"
@@ -2046,7 +2068,7 @@ function buildWidgetScript(): string {
     if (state.config.eyeCatcherTheme === "avatar") {
       var face = document.createElement("span");
       face.textContent = "💬";
-      face.style.cssText = "position:absolute;left:10px;top:10px;width:26px;height:26px;border-radius:50%;background:var(--lcw-accent,#ff5a00);display:grid;place-items:center;font-size:14px";
+      face.style.cssText = "position:absolute;left:10px;top:10px;width:26px;height:26px;border-radius:50%;background:var(--lcw-accent,#0067FF);display:grid;place-items:center;font-size:14px";
       tip.appendChild(face);
     }
     var x = document.createElement("button");
@@ -2223,7 +2245,7 @@ function buildWidgetScript(): string {
     bar.innerHTML = '<span style="flex:1">' + t("cookie") + '</span>';
     var btn = document.createElement("button");
     btn.textContent = t("accept");
-    btn.style.cssText = "border:0;border-radius:6px;background:var(--lcw-accent,#ff5a00);color:#fff;padding:6px 12px;font-weight:800;cursor:pointer";
+    btn.style.cssText = "border:0;border-radius:6px;background:var(--lcw-accent,#0067FF);color:#fff;padding:6px 12px;font-weight:800;cursor:pointer";
     btn.onclick = function () { localStorage.setItem(storagePrefix + "cookieOk", "1"); bar.remove(); };
     bar.appendChild(btn);
     root.appendChild(bar);
@@ -2516,7 +2538,7 @@ function buildWidgetScript(): string {
       var b = document.createElement("button");
       b.type = "button";
       b.textContent = String(label);
-      b.style.cssText = "border:1px solid var(--lcw-accent,#ffd21e);background:transparent;color:inherit;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer";
+      b.style.cssText = "border:1px solid var(--lcw-accent,#0067FF);background:transparent;color:inherit;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer";
       b.addEventListener("click", function () { wrap.remove(); sendMessage(String(label)); });
       wrap.appendChild(b);
     });
@@ -2553,7 +2575,7 @@ function buildWidgetScript(): string {
       if (item.buttonLabel) {
         var btn = document.createElement(item.buttonUrl ? "a" : "button");
         btn.textContent = String(item.buttonLabel);
-        btn.style.cssText = "display:block;margin-top:8px;text-align:center;border:0;border-radius:8px;padding:7px 8px;font-size:11px;font-weight:700;cursor:pointer;background:var(--lcw-accent,#ffd21e);color:#111;text-decoration:none";
+        btn.style.cssText = "display:block;margin-top:8px;text-align:center;border:0;border-radius:8px;padding:7px 8px;font-size:11px;font-weight:700;cursor:pointer;background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);text-decoration:none";
         if (item.buttonUrl) {
           btn.href = String(item.buttonUrl);
           btn.target = "_blank";
@@ -2608,7 +2630,7 @@ function buildWidgetScript(): string {
       link.target = "_blank";
       link.rel = "noopener";
       link.textContent = card.buttonLabel ? String(card.buttonLabel) : "View";
-      link.style.cssText = "background:var(--lcw-accent,#ffd21e);color:#111;font-weight:700;font-size:12px;text-decoration:none;padding:6px 12px;border-radius:8px";
+      link.style.cssText = "background:var(--lcw-accent,#0067FF);color:var(--lcw-on-accent,#fff);font-weight:700;font-size:12px;text-decoration:none;padding:6px 12px;border-radius:8px";
       row.appendChild(link);
     }
     body.appendChild(row);

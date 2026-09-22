@@ -4,7 +4,7 @@ import { MarketingCta, MarketingFooter, MarketingHeader } from "@/components/mar
 
 type Cell = boolean | string;
 
-const COLUMNS = ["Our LiveChat", "Intercom", "Zendesk Chat", "Tawk.to"] as const;
+const COLUMNS = ["Chatme", "Intercom", "Zendesk Chat", "Tawk.to"] as const;
 
 const ROWS: { label: string; cells: [Cell, Cell, Cell, Cell] }[] = [
   { label: "Real-time chat widget", cells: [true, true, true, true] },
@@ -35,7 +35,7 @@ export default function ComparePage() {
       <MarketingHeader />
 
       <section className="mx-auto max-w-4xl px-6 py-16 text-center">
-        <p className="text-sm font-bold uppercase tracking-wide text-[#FF5100]">Compare</p>
+        <p className="text-sm font-bold uppercase tracking-wide text-[#0067FF]">Compare</p>
         <h1 className="mx-auto mt-3 max-w-2xl text-4xl font-bold md:text-5xl">How we stack up</h1>
         <p className="mx-auto mt-4 max-w-lg text-slate-500">
           All the features of the big players — without the per-seat surprise bills.
@@ -50,7 +50,7 @@ export default function ComparePage() {
                 <th className="px-4 py-4 font-bold">Feature</th>
                 {COLUMNS.map((col, i) => (
                   <th
-                    className={`px-4 py-4 text-center font-bold ${i === 0 ? "text-[#FF5100]" : "text-slate-500"}`}
+                    className={`px-4 py-4 text-center font-bold ${i === 0 ? "text-[#0067FF]" : "text-slate-500"}`}
                     key={col}
                   >
                     {col}
@@ -77,10 +77,10 @@ export default function ComparePage() {
         </p>
         <div className="mt-8 text-center">
           <Link
-            className="inline-block rounded-lg bg-[#FF5100] px-6 py-3 text-sm font-bold text-white hover:bg-[#e64a00]"
+            className="inline-block rounded-lg bg-[#0067FF] px-6 py-3 text-sm font-bold text-white hover:bg-[#0050C7]"
             href="/register"
           >
-            Switch to LiveChat
+            Switch to Chatme
           </Link>
         </div>
       </section>

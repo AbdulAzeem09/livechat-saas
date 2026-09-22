@@ -6,8 +6,8 @@ export function setupSwagger(app: INestApplication, config: ConfigService): void
   const version = config.getOrThrow<string>("APP_VERSION");
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle("LiveChat SaaS API")
-    .setDescription("REST API for the LiveChat SaaS platform.")
+    .setTitle("Chatme API")
+    .setDescription("REST API for the Chatme platform.")
     .setVersion(version)
     .addBearerAuth()
     .addCookieAuth("refreshToken")

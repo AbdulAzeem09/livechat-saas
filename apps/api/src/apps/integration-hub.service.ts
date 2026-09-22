@@ -164,7 +164,7 @@ export class IntegrationHubService {
       if (!this.stringOf(settings.webhookUrl)) {
         throw new BadRequestException("Add your Slack webhook URL first");
       }
-      const ok = await this.notifySlack(organizationId, "✅ LiveChat is connected to this channel.");
+      const ok = await this.notifySlack(organizationId, "✅ Chatme is connected to this channel.");
 
       return {
         ok,
@@ -190,7 +190,7 @@ export class IntegrationHubService {
       }
       const ok = await this.syncContactToHubspot(organizationId, {
         email: `livechat-test@${organizationId.slice(0, 8)}.invalid`,
-        name: "LiveChat Test"
+        name: "Chatme Test"
       });
 
       return {

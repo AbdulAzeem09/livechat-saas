@@ -11,16 +11,16 @@ export function AuthShell({ children, mode }: AuthShellProps) {
     <main className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_0.95fr]">
       <section className="relative flex min-h-[320px] flex-col justify-between overflow-hidden bg-[#111214] p-6 text-white lg:p-12">
         <Link className="flex items-center gap-2" href="/">
-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#FF5100] text-white">
+          <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#0067FF] text-white">
             <MessageSquareText className="h-5 w-5" aria-hidden />
           </span>
-          <span className="text-lg font-bold">LiveChat</span>
+          <span className="text-lg font-bold">Chatme</span>
         </Link>
 
         <div className="grid max-w-xl gap-8 py-10">
           <div className="grid gap-3">
             <h1 className="max-w-[15ch] text-4xl font-bold leading-tight sm:text-5xl">
-              Chat with customers in <span className="text-[#FF5100]">real time</span>.
+              Chat with customers in <span className="text-[#0067FF]">real time</span>.
             </h1>
             <p className="max-w-md text-sm leading-6 text-white/70">
               Live chat, chatbots, campaigns, and AI — one focused workspace that never misses a chat.
@@ -34,7 +34,7 @@ export function AuthShell({ children, mode }: AuthShellProps) {
               { icon: Sparkles, label: "Engage", value: "Campaigns" }
             ].map((item) => (
               <div className="rounded-xl border border-white/10 bg-white/[0.06] p-4" key={item.label}>
-                <item.icon className="mb-3 h-4 w-4 text-[#FF5100]" aria-hidden />
+                <item.icon className="mb-3 h-4 w-4 text-[#0067FF]" aria-hidden />
                 <p className="text-xs uppercase text-white/50">{item.label}</p>
                 <p className="mt-1 text-sm font-semibold">{item.value}</p>
               </div>
@@ -55,15 +55,15 @@ export function AuthShell({ children, mode }: AuthShellProps) {
         <div className="w-full max-w-[440px]">
           <div className="mb-7 flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-[#FF5100]">
+              <p className="text-xs font-bold uppercase tracking-wide text-[#0067FF]">
                 {mode === "login" ? "Welcome back" : "Start free"}
               </p>
               <h2 className="mt-2 text-2xl font-bold text-[#111214]">
-                {mode === "login" ? "Sign in to LiveChat" : "Create your account"}
+                {mode === "login" ? "Sign in to Chatme" : "Create your account"}
               </h2>
             </div>
             <Link
-              className="rounded-lg px-3 py-2 text-sm font-bold text-[#FF5100] hover:bg-[#fff0e8]"
+              className="rounded-lg px-3 py-2 text-sm font-bold text-[#0067FF] hover:bg-[#EEF3FF]"
               href={mode === "login" ? "/register" : "/login"}
             >
               {mode === "login" ? "Sign up" : "Log in"}
@@ -71,11 +71,11 @@ export function AuthShell({ children, mode }: AuthShellProps) {
           </div>
           {children}
           <p className="mt-6 text-center text-xs text-slate-400">
-            <Link className="hover:text-[#FF5100]" href="/pricing">
+            <Link className="hover:text-[#0067FF]" href="/pricing">
               See pricing
             </Link>
             {" · "}
-            <Link className="hover:text-[#FF5100]" href="/">
+            <Link className="hover:text-[#0067FF]" href="/">
               Back to home
             </Link>
           </p>
