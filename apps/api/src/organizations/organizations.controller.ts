@@ -5,16 +5,22 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  Req,
   UseGuards
 } from "@nestjs/common";
+import type { Request } from "express";
+import { IsArray, IsOptional, IsString } from "class-validator";
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiPropertyOptional,
   ApiTags
 } from "@nestjs/swagger";
+import { resolveClientIp } from "../common/http/client-ip";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -31,14 +37,63 @@ import { ProvisionClientDto } from "./dto/provision-client.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
 import { UpdateOrganizationDto } from "./dto/update-organization.dto";
 import { OrganizationAccessGuard } from "./guards/organization-access.guard";
+import { AccessRestrictionService } from "./access-restriction.service";
 import { OrganizationsService } from "./organizations.service";
 import type { OrganizationRequestContext } from "./types/organization-context";
+
+export class UpdateAccessRestrictionDto {
+  @ApiPropertyOptional({
+    type: [String],
+    description: "IPs or IPv4 ranges, e.g. 203.0.113.4 or 203.0.113.0/24. Empty means no limit."
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  rules?: string[];
+}
 
 @ApiTags("Organizations")
 @ApiBearerAuth()
 @Controller("organizations")
 export class OrganizationsController {
-  constructor(private readonly organizationsService: OrganizationsService) {}
+  constructor(
+    private readonly organizationsService: OrganizationsService,
+    private readonly accessRestriction: AccessRestrictionService
+  ) {}
+
+  @Get(":organizationId/access-restriction")
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Addresses allowed to open this workspace's dashboard" })
+  @ApiParam({ name: "organizationId" })
+  async getAccessRestriction(
+    @Param("organizationId") organizationId: string,
+    @Req() request: Request
+  ): Promise<{ rules: string[]; yourIp: string | null }> {
+    return {
+      rules: await this.accessRestriction.list(organizationId),
+      // Shown on the screen so an owner can add their own address without having to look it up.
+      yourIp: resolveClientIp(request) ?? null
+    };
+  }
+
+  @Put(":organizationId/access-restriction")
+  @UseGuards(JwtAuthGuard, OrganizationAccessGuard, PermissionsGuard)
+  @Permissions("settings:manage")
+  @ApiOperation({ summary: "Limit the dashboard to certain addresses (empty list removes the limit)" })
+  @ApiParam({ name: "organizationId" })
+  async setAccessRestriction(
+    @Param("organizationId") organizationId: string,
+    @Body() dto: UpdateAccessRestrictionDto,
+    @Req() request: Request
+  ): Promise<{ rules: string[]; yourIp: string | null }> {
+    const clientIp = resolveClientIp(request);
+
+    return {
+      rules: await this.accessRestriction.replace(organizationId, dto.rules ?? [], clientIp),
+      yourIp: clientIp ?? null
+    };
+  }
 
   @Get()
   @UseGuards(JwtAuthGuard)

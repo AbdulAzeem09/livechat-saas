@@ -32,6 +32,7 @@ import type { ListMessagesQuery } from "./dto/list-messages.query";
 import type { SendMessageDto } from "./dto/send-message.dto";
 import type { UpdateConversationDto } from "./dto/update-conversation.dto";
 import { AiPerformanceService } from "../ai/ai-performance.service";
+import { AgentProfilesService } from "../widgets/agent-profiles.service";
 import { ConversationInsightsService } from "../ai/conversation-insights.service";
 import { IntegrationHubService, type CommerceOrder } from "../apps/integration-hub.service";
 import { ConversationsGateway } from "./conversations.gateway";
@@ -46,7 +47,8 @@ export class ConversationsService {
     private readonly fileStorage: FileStorageService,
     private readonly insights: ConversationInsightsService,
     private readonly integrations: IntegrationHubService,
-    private readonly aiPerformance: AiPerformanceService
+    private readonly aiPerformance: AiPerformanceService,
+    private readonly agentProfiles: AgentProfilesService
   ) {}
 
   async listConversations(
@@ -541,7 +543,8 @@ export class ConversationsService {
 
       return { message, conversation: updatedConversation };
     });
-    const messageResponse = this.mapMessage(result.message);
+    // Carry the agent's name and face so the visitor's widget can show who is answering.
+    const messageResponse = await this.withAgentProfile(this.mapMessage(result.message));
 
     this.gateway.emitMessageCreated(messageResponse);
     this.gateway.emitConversationUpdated(this.mapConversation(result.conversation, result.message));
@@ -802,6 +805,17 @@ export class ConversationsService {
       updatedAt: conversation.updatedAt,
       latestMessage: latestMessage ? this.mapMessage(latestMessage) : null
     };
+  }
+
+  /** Attach who sent it, so the visitor sees a person rather than a nameless box. */
+  private async withAgentProfile(message: MessageDto): Promise<MessageDto> {
+    if (message.senderType !== ParticipantType.AGENT || !message.senderMembershipId) {
+      return message;
+    }
+
+    const agent = await this.agentProfiles.forMembership(message.senderMembershipId).catch(() => null);
+
+    return agent ? { ...message, agent } : message;
   }
 
   private mapMessage(message: Message): MessageDto {

@@ -33,6 +33,7 @@ import type { ConversationDto, MessageDto } from "../conversations/dto/conversat
 import { IntegrationsService } from "../integrations/integrations.service";
 import { MailService } from "../mail/mail.service";
 import { IntegrationHubService } from "../apps/integration-hub.service";
+import { AgentProfilesService } from "./agent-profiles.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { FileStorageService, type UploadedFileLike } from "../storage/file-storage.service";
 import type { CreateWidgetConversationDto } from "./dto/create-widget-conversation.dto";
@@ -70,7 +71,8 @@ export class WidgetsService {
     private readonly mail: MailService,
     private readonly prisma: PrismaService,
     private readonly fileStorage: FileStorageService,
-    private readonly integrationHub: IntegrationHubService
+    private readonly integrationHub: IntegrationHubService,
+    private readonly agentProfiles: AgentProfilesService
   ) {}
 
   async getDefaultInstall(organizationId: string): Promise<WidgetInstallDto> {
@@ -527,7 +529,29 @@ export class WidgetsService {
       take: 100
     });
 
-    return messages.map((message) => this.mapMessage(message));
+    return this.withAgentProfiles(messages.map((message) => this.mapMessage(message)));
+  }
+
+  /**
+   * Put a name and a face on agent replies. A visitor talking to "Sarah from Support" behaves
+   * differently from one talking to a nameless box, and it costs one cached lookup per agent.
+   */
+  private async withAgentProfiles(messages: MessageDto[]): Promise<MessageDto[]> {
+    const membershipIds = messages
+      .filter((message) => message.senderType === ParticipantType.AGENT && message.senderMembershipId)
+      .map((message) => message.senderMembershipId as string);
+
+    if (!membershipIds.length) {
+      return messages;
+    }
+
+    const profiles = await this.agentProfiles.forMemberships(membershipIds);
+
+    return messages.map((message) =>
+      message.senderMembershipId && profiles.has(message.senderMembershipId)
+        ? { ...message, agent: profiles.get(message.senderMembershipId) ?? null }
+        : message
+    );
   }
 
   async getConversationStatus(
@@ -1196,6 +1220,9 @@ export class WidgetsService {
     const globalPrefix = this.config.getOrThrow<string>("API_GLOBAL_PREFIX").replace(/^\/|\/$/g, "");
     const scriptUrl = `${apiUrl}/${globalPrefix}/widget.js`;
     const installCode = `<script async src="${scriptUrl}" data-widget-key="${widget.publicKey}"></script>`;
+    // Drop this anywhere on the page — a link, a button, an image — and it opens the chat.
+    // The widget keeps data-livechat-status on it so the site can style closed hours.
+    const chatButtonCode = `<button data-livechat-button>Chat with us</button>`;
 
     return {
       id: widget.id,
@@ -1203,6 +1230,7 @@ export class WidgetsService {
       name: widget.name,
       scriptUrl,
       installCode,
+      chatButtonCode,
       demoUrl: `${appUrl}/widget-demo?key=${encodeURIComponent(widget.publicKey)}`,
       allowedDomains: widget.allowedDomains,
       emailForwardTo: typeof theme.emailForwardTo === "string" ? theme.emailForwardTo : "",
@@ -1561,6 +1589,8 @@ function buildWidgetScript(): string {
       for (var _j = 0; _j < _keys.length; _j++) localStorage.removeItem(_keys[_j]);
     }
   } catch (e) {}
+  // Set once the public JS API is wired up; until then events go nowhere.
+  var widgetEmit = function () {};
   var state = {
     config: null,
     conversationId: localStorage.getItem(storagePrefix + "conversationId") || "",
@@ -1604,6 +1634,7 @@ function buildWidgetScript(): string {
     '.lcw-chead{display:flex;align-items:center;gap:8px;padding:12px 14px}.lcw-icbtn{height:30px;width:30px;border:0;border-radius:8px;background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font-size:14px}' +
     '.lcw-abar{display:flex;align-items:center;gap:10px;background:#26262b;margin:0 14px;padding:10px 12px;border-radius:12px}.lcw-agent-name{font-size:13px;font-weight:700}.lcw-agent-role{font-size:11px;color:#9a9aa2}' +
     '.lcw-messages{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}' +
+    '.lcw-agent-tag{align-self:flex-start;display:flex;align-items:center;gap:6px;margin:6px 0 -2px;font-size:11px;color:#9a9aa2}.lcw-agent-photo{width:18px;height:18px;border-radius:50%;object-fit:cover;flex:none}.lcw-agent-initial{display:flex;align-items:center;justify-content:center;background:#3a3a42;color:#fff;font-size:10px;font-weight:700}' +
     '.lcw-msg{max-width:82%;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.lcw-agent{align-self:flex-start;background:#2f2f36;color:#fff;border-bottom-left-radius:5px}.lcw-visitor{align-self:flex-end;background:var(--lcw-accent,#ffd21e);color:#111;border-bottom-right-radius:5px}.lcw-system{align-self:center;background:transparent;color:#8a8a92;font-size:12px}' +
     '.lcw-greet{align-self:stretch;background:#2f2f36;border-radius:14px;padding:12px}.lcw-greet-emoji{background:#f3f4f6;border-radius:10px;text-align:center;font-size:36px;padding:16px}.lcw-greet-txt{font-size:13px;color:#e6e6ea;margin-top:10px}.lcw-quick{display:flex;gap:8px;margin-top:10px}.lcw-q{border:0;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer}.lcw-q1{background:var(--lcw-accent,#ffd21e);color:#111}.lcw-q2{background:#3a3a42;color:#dcdce2}' +
     '.lcw-form{display:flex;gap:8px;align-items:flex-end;padding:12px 14px}.lcw-input{flex:1;min-width:0;border:1px solid #3a3a42;border-radius:18px;padding:10px 14px;font-size:13px;outline:none;background:#26262b;color:#fff;font-family:inherit;line-height:1.4;resize:none;max-height:96px;overflow-y:auto}.lcw-input::placeholder{color:#8a8a92}.lcw-input:focus{border-color:var(--lcw-accent,#ffd21e)}.lcw-send{height:38px;width:38px;flex:none;border:1px solid var(--lcw-accent,#ffd21e);border-radius:50%;background:transparent;color:var(--lcw-accent,#ffd21e);cursor:pointer;font-weight:900;font-size:16px}' +
@@ -1750,6 +1781,7 @@ function buildWidgetScript(): string {
         }).then(function (result) {
           state.conversationId = result.conversation.id;
           localStorage.setItem(storagePrefix + "conversationId", state.conversationId);
+          widgetEmit("chatStarted", { conversationId: state.conversationId });
           renderMessage(result.message);
           if (state.socket) state.socket.emit("conversation.join", { conversationId: state.conversationId });
           reqReply(state.conversationId);
@@ -1963,6 +1995,10 @@ function buildWidgetScript(): string {
       // Working hours: if enabled and currently offline, show "away" mode.
       var away = config.workingHoursEnabled === true && config.online === false;
       state.away = away;
+      // Chat buttons on the page show the same online/offline state as the bubble.
+      if (window.LiveChatSaaS && window.LiveChatSaaS.refreshButtons) {
+        window.LiveChatSaaS.refreshButtons();
+      }
       var welcome = away
         ? (config.offlineMessage || "We are away right now. Leave a message and we will reply soon.")
         : (config.welcomeMessage || t("welcome"));
@@ -2023,9 +2059,109 @@ function buildWidgetScript(): string {
     container.appendChild(tip);
   }
 
-  // Public JS API so sites can open chat / track sales (sales tracker).
+  // Public JS API: what a website can do with the chat from its own code.
+  // Anything here is callable before the widget has finished loading, so every method
+  // either works on the DOM we already built or waits for the session.
   window.LiveChatSaaS = window.LiveChatSaaS || {};
-  window.LiveChatSaaS.open = function () { openPanel(); showChat(); };
+  var listeners = {};
+
+  /** Tell the page something happened: on("chatStarted" | "message" | "opened" | "closed"). */
+  function emit(event, payload) {
+    var handlers = listeners[event];
+    if (!handlers) return;
+    for (var i = 0; i < handlers.length; i++) {
+      try { handlers[i](payload); } catch (e) {}
+    }
+  }
+  widgetEmit = emit;
+
+  /**
+   * Chat buttons: any element on the page marked data-livechat-button opens the chat.
+   * We also stamp data-livechat-status on it so the site can grey it out when nobody is in,
+   * and re-scan on DOM changes so buttons rendered later still work.
+   */
+  function wireChatButtons() {
+    var buttons = document.querySelectorAll("[data-livechat-button]");
+    for (var i = 0; i < buttons.length; i++) {
+      var button = buttons[i];
+      if (!button.__lcwWired) {
+        button.__lcwWired = true;
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          window.LiveChatSaaS.open();
+        });
+      }
+      button.setAttribute("data-livechat-status", state.away ? "offline" : "online");
+    }
+  }
+  window.LiveChatSaaS.refreshButtons = wireChatButtons;
+  wireChatButtons();
+  // Re-scan when the page changes, but coalesce bursts — a busy app can fire
+  // thousands of mutations and we only need one sweep after they settle.
+  if (window.MutationObserver) {
+    var rescan = null;
+    new MutationObserver(function () {
+      if (rescan) return;
+      rescan = setTimeout(function () { rescan = null; wireChatButtons(); }, 250);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  window.LiveChatSaaS.on = function (event, handler) {
+    if (typeof handler !== "function") return function () {};
+    listeners[event] = listeners[event] || [];
+    listeners[event].push(handler);
+    return function off() {
+      var handlers = listeners[event] || [];
+      var at = handlers.indexOf(handler);
+      if (at >= 0) handlers.splice(at, 1);
+    };
+  };
+
+  window.LiveChatSaaS.open = function () { openPanel(); showChat(); emit("opened", {}); };
+  window.LiveChatSaaS.close = function () { container.classList.remove("lcw-open"); emit("closed", {}); };
+  window.LiveChatSaaS.toggle = function () {
+    if (container.classList.contains("lcw-open")) { window.LiveChatSaaS.close(); }
+    else { window.LiveChatSaaS.open(); }
+  };
+  window.LiveChatSaaS.isOpen = function () { return container.classList.contains("lcw-open"); };
+
+  /** Take the bubble off the page entirely — for pages that have their own chat button. */
+  window.LiveChatSaaS.hide = function () { container.style.display = "none"; };
+  window.LiveChatSaaS.show = function () { container.style.display = ""; };
+
+  /**
+   * Tell us who the visitor is, when the site already knows (they are signed in).
+   * Saves them retyping it into the pre-chat form.
+   */
+  window.LiveChatSaaS.setCustomer = function (details) {
+    if (!details || typeof details !== "object") return;
+    if (details.name) {
+      state.visitorName = String(details.name).slice(0, 160);
+      try { localStorage.setItem(storagePrefix + "visitorName", state.visitorName); } catch (e) {}
+    }
+    if (details.email) {
+      state.visitorEmail = String(details.email).slice(0, 190);
+      try { localStorage.setItem(storagePrefix + "visitorEmail", state.visitorEmail); } catch (e) {}
+    }
+    if (details.id) {
+      state.visitorExternalId = String(details.id).slice(0, 180);
+      try { localStorage.setItem(storagePrefix + "visitorExternalId", state.visitorExternalId); } catch (e) {}
+    }
+    // Already known: don't ask again.
+    if (state.visitorName && state.visitorEmail) {
+      state.preChatDone = true;
+      try { localStorage.setItem(storagePrefix + "preChatDone", "1"); } catch (e) {}
+    }
+  };
+
+  /** Send a message as the visitor, e.g. from a "Ask about this product" button. */
+  window.LiveChatSaaS.sendMessage = function (text) {
+    var body = String(text == null ? "" : text).trim();
+    if (!body) return Promise.resolve(null);
+    openPanel();
+    showChat();
+    sendMessage(body);
+  };
   window.LiveChatSaaS.trackSale = function (amount, currency, reference) {
     var value = Number(amount) || 0;
     var cur = currency || "USD";
@@ -2247,6 +2383,7 @@ function buildWidgetScript(): string {
         }).then(function (result) {
           state.conversationId = result.conversation.id;
           localStorage.setItem(storagePrefix + "conversationId", state.conversationId);
+          widgetEmit("chatStarted", { conversationId: state.conversationId });
           renderMessage(result.message);
           trackGtm("livechat_conversation_started");
           if (state.socket) state.socket.emit("conversation.join", { conversationId: state.conversationId });
@@ -2280,9 +2417,38 @@ function buildWidgetScript(): string {
       .catch(function () {});
   }
 
+  /** "Sarah · Support" with a photo, above the first of that agent's replies. */
+  function buildAgentTag(agent) {
+    var row = document.createElement("div");
+    row.className = "lcw-agent-tag";
+    if (agent.avatarUrl) {
+      var photo = document.createElement("img");
+      photo.className = "lcw-agent-photo";
+      photo.src = agent.avatarUrl;
+      photo.alt = "";
+      photo.onerror = function () { this.remove(); };
+      row.appendChild(photo);
+    } else {
+      var circle = document.createElement("span");
+      circle.className = "lcw-agent-photo lcw-agent-initial";
+      circle.textContent = agent.name.charAt(0).toUpperCase();
+      row.appendChild(circle);
+    }
+    var who = document.createElement("span");
+    who.textContent = agent.title ? agent.name + " · " + agent.title : agent.name;
+    row.appendChild(who);
+    return row;
+  }
+
   function renderMessage(message) {
     if (!message || state.renderedMessageIds[message.id]) return;
     state.renderedMessageIds[message.id] = true;
+    widgetEmit("message", {
+      id: message.id,
+      from: message.senderType === "VISITOR" ? "visitor" : "agent",
+      text: message.body || "",
+      agent: message.agent || null
+    });
     // Rich carousel: several cards the visitor can swipe through.
     var carousel = message.metadata && message.metadata.carousel;
     if (carousel && carousel.cards && carousel.cards.length) {
@@ -2297,6 +2463,15 @@ function buildWidgetScript(): string {
       messages.scrollTop = messages.scrollHeight;
       if (message.senderType === "AGENT") { maybeShowRating(); }
       return;
+    }
+    // Who is answering. Shown once per run of replies, not on every bubble.
+    if (message.senderType === "AGENT" && message.agent && message.agent.name) {
+      if (state.lastAgentShown !== message.agent.name) {
+        state.lastAgentShown = message.agent.name;
+        messages.appendChild(buildAgentTag(message.agent));
+      }
+    } else if (message.senderType === "VISITOR") {
+      state.lastAgentShown = null;
     }
     var bubble = document.createElement("div");
     bubble.className = "lcw-msg " + (message.senderType === "VISITOR" ? "lcw-visitor" : "lcw-agent");

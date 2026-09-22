@@ -133,6 +133,9 @@ export class WidgetInstallDto {
   @ApiProperty()
   installCode!: string;
 
+  @ApiProperty({ description: "Snippet for a chat button placed anywhere on the page" })
+  chatButtonCode!: string;
+
   @ApiProperty()
   demoUrl!: string;
 

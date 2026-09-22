@@ -1,5 +1,7 @@
 import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
+import { ConversationStatus, MessagingChannel } from "@prisma/client";
+import { parseReportFilters, type ReportFilterQuery } from "./report-filters";
 import { Permissions } from "../auth/decorators/permissions.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "../auth/guards/permissions.guard";
@@ -32,8 +34,17 @@ export class ReportsController {
   @Permissions("analytics:read")
   @ApiOperation({ summary: "Conversation and messaging summary metrics" })
   @ApiParam({ name: "organizationId" })
+  @ApiQuery({ name: "from", required: false, description: "Start date, e.g. 2026-09-01" })
+  @ApiQuery({ name: "to", required: false, description: "End date, e.g. 2026-09-30" })
+  @ApiQuery({ name: "agentId", required: false, description: "Only chats assigned to this agent" })
+  @ApiQuery({ name: "tag", required: false, description: "Only chats carrying this tag" })
+  @ApiQuery({ name: "channel", required: false, enum: MessagingChannel })
+  @ApiQuery({ name: "status", required: false, enum: ConversationStatus })
   @ApiOkResponse({ description: "Report summary" })
-  getSummary(@Param("organizationId") organizationId: string): Promise<ReportSummary> {
-    return this.reportsService.getSummary(organizationId);
+  getSummary(
+    @Param("organizationId") organizationId: string,
+    @Query() query: ReportFilterQuery
+  ): Promise<ReportSummary> {
+    return this.reportsService.getSummary(organizationId, parseReportFilters(query));
   }
 }

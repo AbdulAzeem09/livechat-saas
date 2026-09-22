@@ -10,11 +10,13 @@ import { OrganizationsModule } from "../organizations/organizations.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { SchedulesModule } from "../schedules/schedules.module";
 import { StorageModule } from "../storage/storage.module";
+import { AgentProfilesModule } from "./agent-profiles.module";
 import { WidgetsController } from "./widgets.controller";
 import { WidgetsService } from "./widgets.service";
 
 @Module({
   imports: [
+    AgentProfilesModule,
     AppsModule,
     AuthModule,
     AutomationModule,

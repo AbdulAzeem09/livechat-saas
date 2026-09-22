@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { conversationFilter, type ReportFilters } from "./report-filters";
 
 export interface ReportSummary {
   totalConversations: number;
@@ -62,10 +64,31 @@ export interface ReportSummary {
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getSummary(organizationId: string): Promise<ReportSummary> {
+  async getSummary(organizationId: string, filters: ReportFilters = {}): Promise<ReportSummary> {
     const now = new Date();
-    const since = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-    since.setHours(0, 0, 0, 0);
+    const since = filters.from ?? this.startOfDaysAgo(now, 6);
+    const filter = conversationFilter(filters);
+
+    /**
+     * Conversation queries, narrowed by whatever the caller asked for.
+     *
+     * Conditions go in an AND rather than a spread because several of them reach into the
+     * same metadata column — a tag filter and a rating check would otherwise overwrite each
+     * other. A query's own default window is dropped when the caller gave real dates, so
+     * asking for last month doesn't get intersected with "the last 7 days" and come back empty.
+     */
+    const scoped = (
+      own: Prisma.ConversationWhereInput = {},
+      defaultWindow?: Prisma.DateTimeFilter
+    ): Prisma.ConversationWhereInput => {
+      const conditions: Prisma.ConversationWhereInput[] = [filter, own];
+
+      if (defaultWindow && !filter.createdAt) {
+        conditions.push({ createdAt: defaultWindow });
+      }
+
+      return { organizationId, AND: conditions };
+    };
 
     const [
       totalConversations,
@@ -87,28 +110,28 @@ export class ReportsService {
       campaignRows,
       goalRows
     ] = await Promise.all([
-      this.prisma.conversation.count({ where: { organizationId } }),
+      this.prisma.conversation.count({ where: scoped() }),
       this.prisma.message.count({ where: { organizationId } }),
       this.prisma.conversation.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: scoped(),
         _count: { _all: true }
       }),
       this.prisma.conversation.findMany({
-        where: { organizationId, createdAt: { gte: since } },
+        where: scoped({}, { gte: since }),
         select: { createdAt: true }
       }),
       this.prisma.conversation.findMany({
-        where: { organizationId, firstResponseAt: { not: null } },
+        where: scoped({ firstResponseAt: { not: null } }),
         select: { createdAt: true, firstResponseAt: true },
         orderBy: { createdAt: "desc" },
         take: 500
       }),
       this.prisma.conversation.count({
-        where: { organizationId, metadata: { path: ["rating"], equals: "good" } }
+        where: scoped({ metadata: { path: ["rating"], equals: "good" } })
       }),
       this.prisma.conversation.count({
-        where: { organizationId, metadata: { path: ["rating"], equals: "bad" } }
+        where: scoped({ metadata: { path: ["rating"], equals: "bad" } })
       }),
       this.prisma.sale.aggregate({
         where: { organizationId },
@@ -120,17 +143,14 @@ export class ReportsService {
         select: { createdAt: true, amountCents: true, currency: true }
       }),
       this.prisma.conversation.findMany({
-        where: {
-          organizationId,
-          createdAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) }
-        },
+        where: scoped({}, { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) }),
         select: { createdAt: true, metadata: true },
         orderBy: { createdAt: "desc" },
         take: 1000
       }),
       this.prisma.visitorSession.count({ where: { organizationId, startedAt: { gte: since } } }),
       this.prisma.conversation.findMany({
-        where: { organizationId, createdAt: { gte: since } },
+        where: scoped({}, { gte: since }),
         select: { id: true }
       }),
       this.prisma.message.groupBy({
@@ -143,7 +163,7 @@ export class ReportsService {
         where: { organizationId, deletedAt: null, createdAt: { gte: since } }
       }),
       this.prisma.conversation.findMany({
-        where: { organizationId, createdAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) } },
+        where: scoped({}, { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) }),
         select: { metadata: true },
         take: 2000
       }),
@@ -334,6 +354,14 @@ export class ReportsService {
     }
 
     return Array.from(totals.entries()).map(([date, total]) => ({ date, total }));
+  }
+
+  /** Midnight, n days back — the start of the default reporting window. */
+  private startOfDaysAgo(now: Date, days: number): Date {
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    start.setHours(0, 0, 0, 0);
+
+    return start;
   }
 
   private buildDailyBuckets(since: Date, dates: Date[]): Array<{ date: string; count: number }> {

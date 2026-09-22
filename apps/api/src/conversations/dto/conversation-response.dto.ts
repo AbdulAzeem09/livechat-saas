@@ -10,6 +10,18 @@ import {
   ParticipantType
 } from "@prisma/client";
 
+/** The name and face a visitor sees on an agent's reply. Never carries the agent's email. */
+export class MessageAgentDto {
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ nullable: true })
+  title!: string | null;
+
+  @ApiProperty({ nullable: true })
+  avatarUrl!: string | null;
+}
+
 export class MessageDto {
   @ApiProperty()
   id!: string;
@@ -28,6 +40,9 @@ export class MessageDto {
 
   @ApiProperty({ nullable: true })
   senderMembershipId!: string | null;
+
+  @ApiPropertyOptional({ type: MessageAgentDto, nullable: true })
+  agent?: MessageAgentDto | null;
 
   @ApiProperty({ enum: MessageType })
   type!: MessageType;
