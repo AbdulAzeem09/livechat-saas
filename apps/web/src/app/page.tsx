@@ -91,47 +91,67 @@ export default function HomePage() {
       <MarketingHeader />
       <SiteChat />
 
+      {/* --------------------------------------------------- announcement */}
+      <Link
+        className="block bg-[#0B1524] px-5 py-2.5 text-center text-[13.5px] text-white transition-colors hover:bg-[#13213a]"
+        href="/features#ai"
+      >
+        <span className="font-semibold">The AI agent is here.</span>{" "}
+        <span className="text-white/70">It answers from your own knowledge, on every plan.</span>{" "}
+        <span className="font-semibold text-[#6BA4FF]">See how →</span>
+      </Link>
+
       {/* ------------------------------------------------------------- hero */}
-      <section className="border-b border-[#E3E9F2] bg-white px-5 py-12 md:px-8 md:py-16">
-        <div className="mx-auto grid max-w-6xl items-start gap-12 lg:grid-cols-[1.05fr_1fr]">
+      <section className="border-b border-[#E3E9F2] bg-white px-5 pb-16 pt-12 md:px-8 md:pb-20 md:pt-16">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1fr_1.05fr]">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-[#D6E4FF] bg-[#EEF3FF] px-3 py-1 text-[12px] font-semibold text-[#0050C7]">
-              <Bot aria-hidden className="h-3.5 w-3.5" />
-              AI agent included on every plan
-            </span>
-            <h1 className="mt-5 text-balance text-[38px] font-bold leading-[1.08] tracking-[-0.025em] md:text-[54px]">
+            <h1 className="text-balance text-[44px] font-bold leading-[1.02] tracking-[-0.035em] md:text-[68px]">
               Answer customers the moment they ask
             </h1>
-            <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-[#5B6B82]">
-              {BRAND.name} puts live chat on your website and an assistant behind it — so the
-              questions you've answered a hundred times get handled, and your team only sees the
-              ones that need a person.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                className="inline-flex items-center gap-2 rounded-lg bg-[#0067FF] px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#0050C7]"
-                href="/register"
-              >
-                Start free <ArrowRight aria-hidden className="h-4 w-4" />
-              </Link>
-              <Link
-                className="rounded-lg border border-[#CBD6E6] px-6 py-3 text-[15px] font-semibold text-[#1D2B3E] transition-colors hover:bg-[#F1F5FB]"
-                href="/features"
-              >
-                See what's inside
-              </Link>
-            </div>
-            <p className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[#8494A8]">
-              {["No card needed", "5-minute setup", "Cancel any time"].map((item) => (
-                <span className="flex items-center gap-1.5" key={item}>
-                  <Check aria-hidden className="h-3.5 w-3.5 text-[#0E8A5F]" /> {item}
-                </span>
+
+            {/* The promise as three things you can scan in a second, not a paragraph. */}
+            <ul className="mt-8 grid gap-2.5">
+              {[
+                "Reply in seconds, on every channel",
+                "Let the assistant handle the repeats",
+                "See what each chat was worth"
+              ].map((item) => (
+                <li
+                  className="inline-flex w-fit items-center gap-2.5 rounded-full bg-[#EDF7F2] py-2 pl-2 pr-4 text-[15px] font-semibold text-[#0B1524]"
+                  key={item}
+                >
+                  <span className="grid h-6 w-6 flex-none place-items-center rounded-full bg-[#0E8A5F]">
+                    <Check aria-hidden className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                  </span>
+                  {item}
+                </li>
               ))}
+            </ul>
+
+            <Link
+              className="mt-9 inline-flex items-center gap-2 rounded-xl bg-[#0067FF] px-8 py-4 text-[17px] font-bold text-white shadow-[0_10px_30px_-10px_rgba(0,103,255,0.7)] transition-colors hover:bg-[#0050C7]"
+              href="/register"
+            >
+              Start free <ArrowRight aria-hidden className="h-4.5 w-4.5" />
+            </Link>
+            <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13.5px] text-[#5B6B82]">
+              <span>Free {BRAND.trialDays}-day trial</span>
+              <span aria-hidden className="text-[#C3CEDD]">·</span>
+              <span>No credit card required</span>
             </p>
           </div>
 
-          {/* A sketch of the thing itself, rather than a stock photograph. */}
-          <ChatPreview />
+          {/* The product itself, lifted off a tinted ground so it reads as a thing, not a
+              diagram. No stock photograph: a borrowed face would say nothing true about us. */}
+          <div className="relative">
+            <div
+              aria-hidden
+              className="absolute -inset-6 rounded-[32px] bg-gradient-to-br from-[#EEF3FF] via-[#F7F9FC] to-[#E7F3EE]"
+            />
+            <div className="relative">
+              <ChatPreview />
+            </div>
+          </div>
         </div>
       </section>
 

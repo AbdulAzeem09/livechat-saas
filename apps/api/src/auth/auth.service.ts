@@ -122,7 +122,7 @@ export class AuthService {
           welcomeMessage: "Hi there. How can we help?",
           offlineMessage: "Leave a message and the team will reply soon.",
           theme: {
-            accentColor: "#ff5a00",
+            accentColor: "#0067FF",
             position: "right"
           }
         }

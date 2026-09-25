@@ -119,7 +119,11 @@ cp "${APP_DIR}/.env" "${APP_DIR}/packages/database/.env"
 # --prod=false because the .env we just sourced sets NODE_ENV=production, and pnpm then skips
 # devDependencies — which is where prisma, nest and typescript live. Without it nothing can be
 # built: the binaries never land in node_modules/.bin and `prisma generate` dies with ENOENT.
-pnpm install --frozen-lockfile --prod=false
+#
+# confirmModulesPurge=false because re-running this script over an install made with different
+# flags makes pnpm stop and ask "remove the modules directories?" — a question nobody is here
+# to answer, leaving a half-finished install behind.
+pnpm install --frozen-lockfile --prod=false --config.confirmModulesPurge=false
 pnpm --filter @livechat/database db:generate
 pnpm --filter @livechat/database db:deploy
 pnpm build

@@ -77,10 +77,10 @@ export class UpdateWidgetDto {
   @MaxLength(300)
   offlineMessage?: string;
 
-  @ApiPropertyOptional({ example: "#ff5a00", description: "Hex accent color" })
+  @ApiPropertyOptional({ example: "#0067FF", description: "Hex accent color" })
   @IsOptional()
   @IsString()
-  @Matches(/^#[0-9a-fA-F]{6}$/, { message: "accentColor must be a hex color like #ff5a00" })
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: "accentColor must be a hex color like #0067FF" })
   accentColor?: string;
 
   @ApiPropertyOptional({ enum: ["left", "right"] })
