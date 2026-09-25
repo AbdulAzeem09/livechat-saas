@@ -591,7 +591,7 @@ export class OrganizationsService {
         })
       : null;
 
-    const organizationName = organization?.name ?? "a Chatme workspace";
+    const organizationName = organization?.name ?? "a TalkZen workspace";
     const inviterName = inviter?.name ?? inviterMembership?.displayName ?? inviter?.email ?? "A teammate";
     const appUrl = (this.config.get<string>("APP_URL") ?? "http://localhost:3000").replace(/\/$/, "");
     const link = `${appUrl}/invite/${encodeURIComponent(token)}`;
@@ -602,11 +602,11 @@ export class OrganizationsService {
       to: email,
       subject: `${inviterName} invited you to join ${organizationName}`,
       text:
-        `${inviterName} invited you to join ${organizationName} on Chatme as an agent.\n\n` +
+        `${inviterName} invited you to join ${organizationName} on TalkZen as an agent.\n\n` +
         `Accept the invitation and create your account:\n${link}\n\n` +
         "This link expires in 7 days. If you weren't expecting it, you can ignore this email.",
       html:
-        `<p><b>${escape(inviterName)}</b> invited you to join <b>${escape(organizationName)}</b> on Chatme as an agent.</p>` +
+        `<p><b>${escape(inviterName)}</b> invited you to join <b>${escape(organizationName)}</b> on TalkZen as an agent.</p>` +
         `<p><a href="${escape(link)}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Accept invitation</a></p>` +
         `<p style="color:#666;font-size:12px">Or open this link: ${escape(link)}<br>It expires in 7 days. If you weren't expecting it, you can ignore this email.</p>`
     });

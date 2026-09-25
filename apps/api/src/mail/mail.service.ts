@@ -68,7 +68,7 @@ export class MailService {
 
     try {
       const result = (await transporter.sendMail({
-        from: input.from ?? this.config.get<string>("SMTP_FROM") ?? "Chatme <no-reply@example.com>",
+        from: input.from ?? this.config.get<string>("SMTP_FROM") ?? "TalkZen <no-reply@example.com>",
         to: input.to,
         subject: input.subject,
         text: input.text,

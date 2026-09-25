@@ -4,7 +4,7 @@ import { MarketingCta, MarketingFooter, MarketingHeader } from "@/components/mar
 
 type Cell = boolean | string;
 
-const COLUMNS = ["Chatme", "Intercom", "Zendesk Chat", "Tawk.to"] as const;
+const COLUMNS = ["TalkZen", "Intercom", "Zendesk Chat", "Tawk.to"] as const;
 
 const ROWS: { label: string; cells: [Cell, Cell, Cell, Cell] }[] = [
   { label: "Real-time chat widget", cells: [true, true, true, true] },
@@ -80,7 +80,7 @@ export default function ComparePage() {
             className="inline-block rounded-lg bg-[#0067FF] px-6 py-3 text-sm font-bold text-white hover:bg-[#0050C7]"
             href="/register"
           >
-            Switch to Chatme
+            Switch to TalkZen
           </Link>
         </div>
       </section>

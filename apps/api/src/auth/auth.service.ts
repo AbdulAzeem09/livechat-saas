@@ -362,12 +362,12 @@ export class AuthService {
 
     await this.mail.send({
       to: user.email,
-      subject: "Reset your Chatme password",
+      subject: "Reset your TalkZen password",
       text:
-        `We received a request to reset your Chatme password.\n\nSet a new password:\n${link}\n\n` +
+        `We received a request to reset your TalkZen password.\n\nSet a new password:\n${link}\n\n` +
         "This link expires in 1 hour. If you didn't ask for it, you can ignore this email.",
       html:
-        `<p>We received a request to reset your Chatme password.</p>` +
+        `<p>We received a request to reset your TalkZen password.</p>` +
         `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Set a new password</a></p>` +
         `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 1 hour. If you didn't ask for it, you can ignore this email.</p>`
     });
@@ -413,9 +413,9 @@ export class AuthService {
     return this.mail.send({
       to: user.email,
       subject: "Confirm your email address",
-      text: `Confirm your email address to finish setting up Chatme:\n${link}\n\nThis link expires in 24 hours.`,
+      text: `Confirm your email address to finish setting up TalkZen:\n${link}\n\nThis link expires in 24 hours.`,
       html:
-        `<p>Confirm your email address to finish setting up Chatme.</p>` +
+        `<p>Confirm your email address to finish setting up TalkZen.</p>` +
         `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Confirm email</a></p>` +
         `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 24 hours.</p>`
     });

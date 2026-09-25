@@ -14,7 +14,7 @@ export function AuthShell({ children, mode }: AuthShellProps) {
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#0067FF] text-white">
             <MessageSquareText className="h-5 w-5" aria-hidden />
           </span>
-          <span className="text-lg font-bold">Chatme</span>
+          <span className="text-lg font-bold">TalkZen</span>
         </Link>
 
         <div className="grid max-w-xl gap-8 py-10">
@@ -59,7 +59,7 @@ export function AuthShell({ children, mode }: AuthShellProps) {
                 {mode === "login" ? "Welcome back" : "Start free"}
               </p>
               <h2 className="mt-2 text-2xl font-bold text-[#111214]">
-                {mode === "login" ? "Sign in to Chatme" : "Create your account"}
+                {mode === "login" ? "Sign in to TalkZen" : "Create your account"}
               </h2>
             </div>
             <Link

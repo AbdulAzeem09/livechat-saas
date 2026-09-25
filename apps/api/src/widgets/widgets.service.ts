@@ -1569,7 +1569,7 @@ function buildWidgetScript(): string {
   }
 
   if (!widgetKey || !currentScript || !currentScript.src) {
-    console.warn("[Chatme] Missing data-widget-key.");
+    console.warn("[TalkZen] Missing data-widget-key.");
     return;
   }
 
@@ -1651,14 +1651,14 @@ function buildWidgetScript(): string {
             '<button class="lcw-letschat" type="button">Let’s chat ➤</button>' +
           '</div></div>' +
           '<div class="lcw-tabs"><button class="lcw-tab lcw-tab-home on" type="button"><b>\u{1F3E0}</b>Home</button><button class="lcw-tab lcw-tab-chat" type="button"><b>\u{1F4AC}</b>Chat</button></div>' +
-          '<div class="lcw-powered">Powered by Chatme</div>' +
+          '<div class="lcw-powered">Powered by TalkZen</div>' +
         '</div>' +
         '<div class="lcw-chat">' +
           '<header class="lcw-chead"><button class="lcw-back lcw-icbtn" type="button" aria-label="Back">&#8592;</button><div style="flex:1"></div><button class="lcw-close lcw-icbtn" type="button" aria-label="Close">&#10005;</button></header>' +
           '<div class="lcw-abar"><div class="lcw-av"><span class="lcw-agent-ini">LC</span><span class="lcw-dot" style="border-color:#26262b"></span></div><div><div class="lcw-agent-name">Support</div><div class="lcw-agent-role">We reply in a few minutes</div></div></div>' +
           '<div class="lcw-messages"></div>' +
           '<form class="lcw-form"><input class="lcw-file-input" type="file" hidden /><button class="lcw-attach" type="button" aria-label="Attach a file">📎</button><textarea class="lcw-input" autocomplete="off" rows="1" placeholder="Write a message..."></textarea><button class="lcw-send" type="submit">➤</button></form>' +
-          '<div class="lcw-powered">Powered by Chatme</div>' +
+          '<div class="lcw-powered">Powered by TalkZen</div>' +
         '</div>' +
       '</section>' +
       '<button class="lcw-launcher" type="button" aria-label="Open chat">\u{1F4AC}</button>' +

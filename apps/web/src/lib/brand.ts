@@ -5,8 +5,8 @@
  * the auth screens and the page titles follow. Nothing else should hard-code the brand.
  */
 export const BRAND = {
-  name: "Chatme",
-  /** Used in page titles: "Pricing — Chatme". */
+  name: "TalkZen",
+  /** Used in page titles: "Pricing — TalkZen". */
   tagline: "Live chat and an AI agent for your website",
   /** One sentence, for the footer and meta descriptions. */
   summary:

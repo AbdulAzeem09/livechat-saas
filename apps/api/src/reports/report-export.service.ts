@@ -295,7 +295,7 @@ export class ReportExportService implements OnModuleDestroy {
       schedule.recipients.map((to) =>
         this.mail.send({
           to,
-          subject: `Chatme ${schedule.frequency} ${schedule.reportType} report`,
+          subject: `TalkZen ${schedule.frequency} ${schedule.reportType} report`,
           text
         })
       )

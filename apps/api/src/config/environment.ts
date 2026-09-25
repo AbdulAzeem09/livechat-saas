@@ -42,7 +42,7 @@ const environmentSchema = z.object({
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
-  SMTP_FROM: z.string().default("Chatme <no-reply@example.com>"),
+  SMTP_FROM: z.string().default("TalkZen <no-reply@example.com>"),
   FILE_STORAGE_DRIVER: z.enum(["local", "supabase"]).default("local"),
   SUPABASE_URL: z.string().optional().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(""),

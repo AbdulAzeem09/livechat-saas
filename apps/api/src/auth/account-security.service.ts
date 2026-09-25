@@ -132,7 +132,7 @@ export class AccountSecurityService {
     });
 
     const label = encodeURIComponent(email);
-    const issuer = encodeURIComponent("Chatme");
+    const issuer = encodeURIComponent("TalkZen");
 
     return {
       secret,

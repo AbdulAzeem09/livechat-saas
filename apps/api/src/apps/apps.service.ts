@@ -75,7 +75,7 @@ export const APP_CATALOG: AppCatalogEntry[] = [
     key: "wordpress",
     name: "WordPress plugin",
     description: "Drop the chat widget onto a WordPress site without editing code.",
-    setupHint: "Settings → Install Chatme"
+    setupHint: "Settings → Install TalkZen"
   }
 ];
 

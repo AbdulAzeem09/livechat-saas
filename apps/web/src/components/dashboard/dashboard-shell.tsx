@@ -746,7 +746,7 @@ const secondaryNav: Record<ScreenKey, SecondaryItem[]> = {
     { label: "Payment methods" }
   ],
   settings: [
-    { label: "Install Chatme", count: "ON" },
+    { label: "Install TalkZen", count: "ON" },
     { label: "Email by HelpDesk", count: "OFF" },
     { label: "Messaging channels" },
     { label: "Website widget" },
@@ -773,7 +773,7 @@ const screenTitles: Record<ScreenKey, string> = {
   apps: "Explore apps",
   tickets: "Tickets",
   billing: "Subscription",
-  settings: "Install Chatme"
+  settings: "Install TalkZen"
 };
 
 const channels = [
@@ -804,11 +804,11 @@ const appCards = [
   {
     name: "ChatBot",
     price: "Free to install",
-    copy: "Integrate ChatBot to get a customer service chatbot in Chatme.",
+    copy: "Integrate ChatBot to get a customer service chatbot in TalkZen.",
     accent: "CB"
   },
   {
-    name: "KnowledgeBase for Chatme",
+    name: "KnowledgeBase for TalkZen",
     price: "Free to install",
     copy: "Empower support with self-service answers and article suggestions.",
     accent: "KB"
@@ -816,7 +816,7 @@ const appCards = [
   {
     name: "WhatsApp Business",
     price: "Free to install",
-    copy: "Manage WhatsApp conversations in the Chatme app.",
+    copy: "Manage WhatsApp conversations in the TalkZen app.",
     accent: "WA"
   }
 ];
@@ -1411,7 +1411,7 @@ export function DashboardShell() {
     [conversations, selectedConversationId]
   );
   const activeNavItem = primaryNav.find((item) => item.key === activeScreen) ?? primaryNav[0];
-  // Engage > Campaigns is a light panel; Traffic and Goals stay dark (matches Chatme).
+  // Engage > Campaigns is a light panel; Traffic and Goals stay dark (matches TalkZen).
   const isLightScreen =
     activeScreen === "engage"
       ? activeSecondary === "Campaigns"
@@ -3338,7 +3338,7 @@ export function DashboardShell() {
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#0067FF] shadow-lg shadow-orange-900/40">
             <MessageCircle className="h-6 w-6 text-white" aria-hidden />
           </span>
-          <span className="text-2xl font-bold tracking-tight">Chatme</span>
+          <span className="text-2xl font-bold tracking-tight">TalkZen</span>
         </div>
         <div className="h-1.5 w-52 overflow-hidden rounded-full bg-white/10">
           <div className="h-full w-1/3 animate-pulse rounded-full bg-[#0067FF]" />
@@ -5112,7 +5112,7 @@ function OverviewScreen({
           </h2>
           <p className="mt-0.5 flex items-center gap-1.5 text-sm text-white/60">
             <Plus className="h-3.5 w-3.5 text-[#4ea2ff]" aria-hidden />
-            Check your stats and suggestions for using Chatme
+            Check your stats and suggestions for using TalkZen
           </p>
         </div>
       </section>
@@ -9565,7 +9565,7 @@ function ReportsScreen({
     );
   }
 
-  // Plan-gated / no-data-yet reports (matches how Chatme locks these)
+  // Plan-gated / no-data-yet reports (matches how TalkZen locks these)
   if (["My saved views", "Reviews"].includes(view)) {
     return (
       <div className="min-h-full bg-white px-7 py-6 text-[#111214]">
@@ -9991,7 +9991,7 @@ function IntegrationsScreen({
             <div>
               <h2 className="text-lg font-bold">API keys</h2>
               <p className="text-sm text-slate-500">
-                Authenticate REST requests to your Chatme data. Keep keys secret.
+                Authenticate REST requests to your TalkZen data. Keep keys secret.
               </p>
             </div>
           </div>
@@ -10746,7 +10746,7 @@ function AppsScreen({
         {[
           ["By text", "Apps from the Text team designed to simplify your day-to-day tasks.", "bg-slate-100"],
           ["AI-Powered", "Extend your workspace with AI apps that boost customer service.", "bg-violet-50"],
-          ["New & Noteworthy", "High-quality apps recognized by Chatme experts.", "bg-blue-50"],
+          ["New & Noteworthy", "High-quality apps recognized by TalkZen experts.", "bg-blue-50"],
           ["Staff Top Picks", "Feature-rich apps with a great experience.", "bg-green-100"]
         ].map(([title, copy, tone]) => (
           <button
@@ -12831,7 +12831,7 @@ function SettingsScreen({
     );
   }
 
-  // "Install Chatme", "Website widget" → the install + customize screen below.
+  // "Install TalkZen", "Website widget" → the install + customize screen below.
   return (
     <div className="min-h-full bg-white px-6 py-6 text-black">
       <WidgetSwitcher
@@ -14243,7 +14243,7 @@ function SettingsDetailModal({
       case "Facebook Messenger":
         return (
           <div className="space-y-4">
-            <p className="text-sm text-slate-500">Reply to Facebook Messenger chats from Chatme.</p>
+            <p className="text-sm text-slate-500">Reply to Facebook Messenger chats from TalkZen.</p>
             <SettingsField label="Facebook Page ID" placeholder="1234567890" settingKey="fb_page_id" />
             <button
               className="rounded-lg bg-[#1877f2] px-4 py-2 text-sm font-bold text-white hover:bg-[#0f66d6]"
@@ -14374,7 +14374,7 @@ async function supportFetch<T>(path: string, options?: RequestInit): Promise<T> 
 
 /**
  * The orange bubble in the dashboard — the CLIENT's own support channel to the
- * platform's support team. Talks to a separate "Chatme Support" org via its
+ * platform's support team. Talks to a separate "TalkZen Support" org via its
  * public widget, using the logged-in client's identity so support knows who's asking.
  */
 function BottomChatWidget({
@@ -14553,7 +14553,7 @@ function BottomChatWidget({
               <MessageCircle className="h-4 w-4" aria-hidden />
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-bold">Chatme Support</p>
+              <p className="text-sm font-bold">TalkZen Support</p>
               <p className="text-[11px] text-white/60">We usually reply in a few minutes</p>
             </div>
             <button aria-label="Close" className="ml-auto text-white/70 hover:text-white" onClick={() => setOpen(false)} type="button">
@@ -14685,7 +14685,7 @@ function ProfileMenu({
           className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-slate-50"
           onClick={() => {
             onClose();
-            onNavigate("settings", "Install Chatme");
+            onNavigate("settings", "Install TalkZen");
           }}
           type="button"
         >

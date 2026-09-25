@@ -6,8 +6,8 @@ export function setupSwagger(app: INestApplication, config: ConfigService): void
   const version = config.getOrThrow<string>("APP_VERSION");
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle("Chatme API")
-    .setDescription("REST API for the Chatme platform.")
+    .setTitle("TalkZen API")
+    .setDescription("REST API for the TalkZen platform.")
     .setVersion(version)
     .addBearerAuth()
     .addCookieAuth("refreshToken")

@@ -1,4 +1,4 @@
-# Deploying Chatme (free tier for testing)
+# Deploying TalkZen (free tier for testing)
 
 **Stack:** Web → Vercel · API → Render · DB → Supabase (existing).
 

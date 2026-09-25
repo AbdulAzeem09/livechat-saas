@@ -131,7 +131,7 @@ export class MonitoringService {
     ].join("\n");
 
     await Promise.all(
-      recipients.map((to) => this.mail.send({ to, subject: `Chatme alert: ${subject}`, text }))
+      recipients.map((to) => this.mail.send({ to, subject: `TalkZen alert: ${subject}`, text }))
     ).catch(() => undefined);
   }
 
