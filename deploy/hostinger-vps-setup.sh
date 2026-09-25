@@ -116,7 +116,10 @@ set -a
 . "${APP_DIR}/.env"
 set +a
 cp "${APP_DIR}/.env" "${APP_DIR}/packages/database/.env"
-pnpm install --frozen-lockfile
+# --prod=false because the .env we just sourced sets NODE_ENV=production, and pnpm then skips
+# devDependencies — which is where prisma, nest and typescript live. Without it nothing can be
+# built: the binaries never land in node_modules/.bin and `prisma generate` dies with ENOENT.
+pnpm install --frozen-lockfile --prod=false
 pnpm --filter @livechat/database db:generate
 pnpm --filter @livechat/database db:deploy
 pnpm build
