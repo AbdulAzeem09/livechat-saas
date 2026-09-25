@@ -71,6 +71,8 @@ API_GLOBAL_PREFIX=api/v1
 API_CORS_ORIGINS=https://${DOMAIN}
 SOCKET_IO_CORS_ORIGIN=https://${DOMAIN}
 NEXT_PUBLIC_API_URL=https://${DOMAIN}/api/v1
+# nginx serves the site and the API on the same port, so the browser asks its own origin.
+NEXT_PUBLIC_API_SAME_ORIGIN=true
 
 DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}?schema=public
 REDIS_URL=redis://127.0.0.1:6379
