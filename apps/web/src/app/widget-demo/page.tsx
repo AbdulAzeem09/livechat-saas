@@ -14,7 +14,7 @@ export default async function WidgetDemoPage({ searchParams }: WidgetDemoPagePro
     <main className="min-h-screen bg-[#f4f7fb] text-slate-950">
       <section className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-6 py-12">
         <div className="mb-8 max-w-2xl">
-          <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#ff5a00]">
+          <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#0067FF]">
             Customer website demo
           </p>
           <h1 className="mt-4 text-4xl font-black leading-tight md:text-6xl">

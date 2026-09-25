@@ -368,7 +368,7 @@ export class AuthService {
         "This link expires in 1 hour. If you didn't ask for it, you can ignore this email.",
       html:
         `<p>We received a request to reset your TalkZen password.</p>` +
-        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Set a new password</a></p>` +
+        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#0067FF;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Set a new password</a></p>` +
         `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 1 hour. If you didn't ask for it, you can ignore this email.</p>`
     });
   }
@@ -416,7 +416,7 @@ export class AuthService {
       text: `Confirm your email address to finish setting up TalkZen:\n${link}\n\nThis link expires in 24 hours.`,
       html:
         `<p>Confirm your email address to finish setting up TalkZen.</p>` +
-        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Confirm email</a></p>` +
+        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#0067FF;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Confirm email</a></p>` +
         `<p style="color:#666;font-size:12px">Or open: ${link}<br>This link expires in 24 hours.</p>`
     });
   }

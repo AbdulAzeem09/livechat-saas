@@ -607,7 +607,7 @@ export class OrganizationsService {
         "This link expires in 7 days. If you weren't expecting it, you can ignore this email.",
       html:
         `<p><b>${escape(inviterName)}</b> invited you to join <b>${escape(organizationName)}</b> on TalkZen as an agent.</p>` +
-        `<p><a href="${escape(link)}" style="display:inline-block;padding:10px 18px;background:#ff5100;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Accept invitation</a></p>` +
+        `<p><a href="${escape(link)}" style="display:inline-block;padding:10px 18px;background:#0067FF;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Accept invitation</a></p>` +
         `<p style="color:#666;font-size:12px">Or open this link: ${escape(link)}<br>It expires in 7 days. If you weren't expecting it, you can ignore this email.</p>`
     });
   }

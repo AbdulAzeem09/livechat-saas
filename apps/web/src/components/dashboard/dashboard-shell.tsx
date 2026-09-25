@@ -11223,7 +11223,7 @@ function BillingScreen({
                 <p className="mt-6 text-xs uppercase tracking-wide text-slate-400">Current plan</p>
                 <div className="mt-2 flex items-center justify-between border-b border-slate-100 pb-4">
                   <div className="flex items-center gap-3">
-                    <span className="grid h-8 w-8 place-items-center rounded-md bg-[#ff5a00] text-xs font-bold text-white">
+                    <span className="grid h-8 w-8 place-items-center rounded-md bg-[#0067FF] text-xs font-bold text-white">
                       LC
                     </span>
                     <div>
@@ -12311,8 +12311,8 @@ const EMPTY_CAROUSEL_CARD: CarouselCard = {
 
 const EYE_CATCHER_THEMES: Array<{ id: string; label: string; preview: string }> = [
   { id: "bubble", label: "Bubble", preview: "rounded-2xl bg-white text-slate-900 shadow-lg" },
-  { id: "card", label: "Card", preview: "rounded-xl bg-white text-slate-900 shadow-lg border-l-4 border-[#ff5a00]" },
-  { id: "banner", label: "Banner", preview: "rounded-lg bg-[#ff5a00] text-white font-bold shadow-lg" },
+  { id: "card", label: "Card", preview: "rounded-xl bg-white text-slate-900 shadow-lg border-l-4 border-[#0067FF]" },
+  { id: "banner", label: "Banner", preview: "rounded-lg bg-[#0067FF] text-white font-bold shadow-lg" },
   { id: "pill", label: "Pill", preview: "rounded-full bg-white text-slate-900 shadow-lg" },
   { id: "dark", label: "Dark", preview: "rounded-2xl bg-[#1f1f23] text-white shadow-lg" },
   { id: "avatar", label: "With avatar", preview: "rounded-2xl bg-white text-slate-900 shadow-lg pl-9" }
@@ -12350,7 +12350,7 @@ function EyeCatcherThemePicker({
             <span className="mb-2 block text-xs font-bold text-slate-600">{theme.label}</span>
             <span className={cn("relative block px-3 py-2 text-[11px] leading-snug", theme.preview)}>
               {theme.id === "avatar" ? (
-                <span className="absolute left-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#ff5a00] text-[10px]">
+                <span className="absolute left-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#0067FF] text-[10px]">
                   💬
                 </span>
               ) : null}
@@ -12562,7 +12562,7 @@ function SettingsScreen({
   const [name, setName] = useState("");
   const [welcomeMessage, setWelcomeMessage] = useState("");
   const [offlineMessage, setOfflineMessage] = useState("");
-  const [accentColor, setAccentColor] = useState("#ff5a00");
+  const [accentColor, setAccentColor] = useState("#0067FF");
   const [position, setPosition] = useState<"left" | "right">("right");
   const [preChatEnabled, setPreChatEnabled] = useState(false);
   const [hidePoweredBy, setHidePoweredBy] = useState(false);
@@ -12579,7 +12579,7 @@ function SettingsScreen({
     setName(config.name ?? "");
     setWelcomeMessage(config.welcomeMessage ?? "");
     setOfflineMessage(config.offlineMessage ?? "");
-    setAccentColor(config.theme?.accentColor ?? "#ff5a00");
+    setAccentColor(config.theme?.accentColor ?? "#0067FF");
     setPosition(config.theme?.position ?? "right");
     setPreChatEnabled(config.preChatEnabled ?? false);
     setHidePoweredBy(config.hidePoweredBy ?? false);
@@ -14549,7 +14549,7 @@ function BottomChatWidget({
       {open && (
         <div className="lc-pop flex h-[460px] w-[340px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl">
           <div className="flex items-center gap-2 bg-[#111214] px-4 py-3 text-white">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-[#ff5a00]">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-[#0067FF]">
               <MessageCircle className="h-4 w-4" aria-hidden />
             </span>
             <div className="min-w-0">
@@ -14575,7 +14575,7 @@ function BottomChatWidget({
                     <div
                       className={cn(
                         "max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                        mine ? "rounded-br-sm bg-[#ff5a00] text-white" : "rounded-bl-sm bg-white text-slate-800"
+                        mine ? "rounded-br-sm bg-[#0067FF] text-white" : "rounded-bl-sm bg-white text-slate-800"
                       )}
                     >
                       {message.body}
@@ -14596,7 +14596,7 @@ function BottomChatWidget({
 
           <form className="flex items-center gap-2 border-t border-slate-200 p-3" onSubmit={send}>
             <input
-              className="min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-[#ff5a00]"
+              className="min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-[#0067FF]"
               onChange={(event) => setDraft(event.target.value)}
               placeholder={
                 status === "RESOLVED" || status === "CLOSED" ? "Ask something else…" : "Write a message…"
@@ -14604,7 +14604,7 @@ function BottomChatWidget({
               value={draft}
             />
             <button
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#ff5a00] text-white hover:bg-[#e84f00] disabled:opacity-50"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0067FF] text-white hover:bg-[#0050C7] disabled:opacity-50"
               disabled={sending || !draft.trim()}
               type="submit"
             >
@@ -14615,7 +14615,7 @@ function BottomChatWidget({
       )}
       <button
         aria-label={open ? "Close support chat" : "Open support chat"}
-        className="grid h-14 w-14 place-items-center rounded-full bg-[#ff5a00] text-white shadow-xl hover:bg-[#e84f00]"
+        className="grid h-14 w-14 place-items-center rounded-full bg-[#0067FF] text-white shadow-xl hover:bg-[#0050C7]"
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
