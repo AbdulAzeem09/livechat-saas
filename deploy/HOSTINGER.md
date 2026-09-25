@@ -1,4 +1,4 @@
-# Putting LiveChat live on a Hostinger VPS
+# Putting Chatme live on a Hostinger VPS
 
 Everything runs on one server: the website, the API, the live chat, PostgreSQL, Redis and
 SSL. No Vercel, no Render, no Supabase needed.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of a fresh Hostinger VPS (Ubuntu 22.04/24.04) to run LiveChat.
+# One-time setup of a fresh Hostinger VPS (Ubuntu 22.04/24.04) to run Chatme.
 #
 #   ssh root@YOUR_VPS_IP
 #   curl -fsSL https://raw.githubusercontent.com/AbdulAzeem09/livechat-saas/master/deploy/hostinger-vps-setup.sh -o setup.sh
@@ -90,9 +90,18 @@ SMTP_HOST=
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASSWORD=
-SMTP_FROM="LiveChat <no-reply@${DOMAIN}>"
+SMTP_FROM="Chatme <no-reply@${DOMAIN}>"
 ANTHROPIC_API_KEY=
 SUPER_ADMIN_EMAILS=
+
+# The address shown on the public site. Left blank, the site says "Get in touch" and
+# points at the contact page rather than printing an address nobody answers.
+NEXT_PUBLIC_SUPPORT_EMAIL=
+
+# Your own chat widget on your own marketing pages. Sign up on the new site, copy the
+# key from Settings → Install Chatme, paste it here and run the update script. It is
+# the contact channel and a live demo at once.
+NEXT_PUBLIC_SITE_WIDGET_KEY=
 ENV
 chmod 600 "${APP_DIR}/.env"
 cp "${APP_DIR}/.env" "${APP_DIR}/apps/api/.env"
@@ -174,7 +183,7 @@ chmod +x /etc/cron.daily/livechat-backup
 say "Done"
 cat <<DONE
 
-  Your LiveChat is live:  https://${DOMAIN}
+  Your Chatme is live:  https://${DOMAIN}
 
   Database password (write this down): ${DB_PASSWORD}
   Settings file:                       ${APP_DIR}/.env

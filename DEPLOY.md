@@ -1,4 +1,4 @@
-# Deploying LiveChat SaaS (free tier for testing)
+# Deploying Chatme (free tier for testing)
 
 **Stack:** Web → Vercel · API → Render · DB → Supabase (existing).
 

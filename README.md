@@ -1,6 +1,6 @@
-# LiveChat SaaS
+# Chatme
 
-A production-oriented SaaS live chat platform inspired by LiveChat.com. The product is structured as a TypeScript monorepo with a Next.js web app, NestJS API, PostgreSQL database, Socket.IO realtime gateway, JWT and Google authentication, Stripe billing, and Docker-based deployment.
+A production-oriented SaaS live chat platform inspired by Chatme.com. The product is structured as a TypeScript monorepo with a Next.js web app, NestJS API, PostgreSQL database, Socket.IO realtime gateway, JWT and Google authentication, Stripe billing, and Docker-based deployment.
 
 ## Module Plan
 
@@ -11,7 +11,7 @@ A production-oriented SaaS live chat platform inspired by LiveChat.com. The prod
 5. CRM, tickets, canned responses, file sharing, and notifications
 6. Admin, analytics, billing, tests, Docker, and deployment guide
 
-Expanded LiveChat-style feature scope and phased roadmap are tracked in `docs/product/feature-scope.md`.
+Expanded Chatme-style feature scope and phased roadmap are tracked in `docs/product/feature-scope.md`.
 
 ## Workspace Layout
 
