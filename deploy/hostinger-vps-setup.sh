@@ -142,12 +142,17 @@ server {
   server_name ${DOMAIN};
   client_max_body_size 25m;
 
-  # The API and the live chat socket
+  # The API
   location /api/ {
     proxy_pass http://127.0.0.1:4000;
     include /etc/nginx/proxy_params;
   }
-  location /chat/ {
+  # The live chat socket. Despite the gateway's namespace being "/chat", Socket.IO's actual
+  # HTTP handshake always happens on its own path, /socket.io/ — the namespace is a logical
+  # channel inside that connection, not a URL. Routing on /chat/ here would never match a
+  # single real request; every socket would silently fall through to the website below and
+  # fail to connect.
+  location /socket.io/ {
     proxy_pass http://127.0.0.1:4000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
