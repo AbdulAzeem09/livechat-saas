@@ -267,6 +267,16 @@ export class ConversationsGateway {
       .emit("message.created", { message });
   }
 
+  /**
+   * Agent-initiated proactive chat: push the new conversation straight to the visitor who is
+   * currently on the site, so it appears without them opening the widget themselves. A visitor
+   * who isn't connected right now (socket dropped, tab backgrounded) simply doesn't get this —
+   * they pick the conversation up on their next heartbeat instead.
+   */
+  emitConversationInvited(sessionToken: string, conversation: ConversationDto, message: MessageDto): void {
+    this.server.to(this.visitorRoom(sessionToken)).emit("conversation.invited", { conversation, message });
+  }
+
   private async handleVisitorConnection(client: Socket): Promise<void> {
     const widgetKey = this.extractWidgetKey(client);
     const sessionToken = this.extractVisitorSessionToken(client);

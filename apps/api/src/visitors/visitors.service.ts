@@ -1,12 +1,21 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  Conversation,
+  ConversationSource,
   ConversationStatus,
+  Message,
+  MessageStatus,
+  MessageType,
+  MessageVisibility,
+  ParticipantType,
   Visitor,
   VisitorPageView,
   VisitorSession
 } from "@prisma/client";
-import { Conversation } from "@prisma/client";
+import { ConversationsGateway } from "../conversations/conversations.gateway";
+import type { ConversationDto, MessageDto } from "../conversations/dto/conversation-response.dto";
 import { PrismaService } from "../prisma/prisma.service";
+import { AgentProfilesService } from "../widgets/agent-profiles.service";
 import { LiveVisitorDto } from "./dto/visitor-response.dto";
 
 /** Visitors seen within this window appear in Traffic (browsing now or recently left). */
@@ -16,7 +25,11 @@ const ONLINE_WINDOW_MS = 60_000;
 
 @Injectable()
 export class VisitorsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: ConversationsGateway,
+    private readonly agentProfiles: AgentProfilesService
+  ) {}
 
   async listLive(organizationId: string): Promise<LiveVisitorDto[]> {
     const since = new Date(Date.now() - LIVE_WINDOW_MS);
@@ -136,5 +149,156 @@ export class VisitorsService {
       map.set(row.visitorId, (map.get(row.visitorId) ?? 0) + 1);
     }
     return map;
+  }
+
+  /**
+   * The "Start chat" button on Traffic: an agent opens a conversation with someone who is
+   * just browsing, before the visitor has said anything. Only ever offered for a visitor with
+   * no conversation already running, but a second click racing the first is still possible, so
+   * that case is refused rather than silently creating a duplicate.
+   */
+  async startChat(
+    organizationId: string,
+    visitorId: string,
+    membershipId: string,
+    message: string | undefined
+  ): Promise<{ conversation: ConversationDto; message: MessageDto }> {
+    const visitor = await this.prisma.visitor.findFirst({ where: { id: visitorId, organizationId } });
+
+    if (!visitor) {
+      throw new NotFoundException("Visitor not found");
+    }
+
+    // Their most recent session tells us which widget they're on, and its session token is
+    // the socket room a live push reaches. One outside the live window means they have
+    // genuinely left, whatever the screen the agent was looking at last showed.
+    const since = new Date(Date.now() - LIVE_WINDOW_MS);
+    const session = await this.prisma.visitorSession.findFirst({
+      where: { organizationId, visitorId, startedAt: { gte: since } },
+      orderBy: { startedAt: "desc" }
+    });
+
+    if (!session) {
+      throw new BadRequestException("This visitor is no longer on the site.");
+    }
+
+    const alreadyChatting = await this.prisma.conversation.findFirst({
+      where: {
+        organizationId,
+        visitorId,
+        status: { in: [ConversationStatus.QUEUED, ConversationStatus.OPEN, ConversationStatus.PENDING] }
+      },
+      select: { id: true }
+    });
+
+    if (alreadyChatting) {
+      throw new BadRequestException("This visitor already has an open chat.");
+    }
+
+    const body = message?.trim().slice(0, 4000) || "Hi! Is there anything I can help you with?";
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const conversation = await transaction.conversation.create({
+        data: {
+          organizationId,
+          visitorId,
+          widgetId: session.widgetId,
+          assignedAgentId: membershipId,
+          source: ConversationSource.WIDGET,
+          status: ConversationStatus.OPEN,
+          subject: "Proactive chat"
+        }
+      });
+
+      await transaction.conversationParticipant.createMany({
+        data: [
+          {
+            organizationId,
+            conversationId: conversation.id,
+            participantType: ParticipantType.AGENT,
+            membershipId
+          },
+          { organizationId, conversationId: conversation.id, participantType: ParticipantType.VISITOR, visitorId }
+        ]
+      });
+
+      const created = await transaction.message.create({
+        data: {
+          organizationId,
+          conversationId: conversation.id,
+          senderType: ParticipantType.AGENT,
+          senderMembershipId: membershipId,
+          type: MessageType.TEXT,
+          visibility: MessageVisibility.PUBLIC,
+          status: MessageStatus.SENT,
+          body
+        }
+      });
+
+      // Not a "first response": nobody asked anything here, the agent opened this themselves —
+      // counting it would make the response-time report look better than it really is.
+      const updated = await transaction.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: created.createdAt }
+      });
+
+      return { conversation: updated, message: created };
+    });
+
+    const agent = await this.agentProfiles.forMembership(membershipId).catch(() => null);
+    const conversationDto = this.mapConversation(result.conversation);
+    const messageDto: MessageDto = { ...this.mapMessage(result.message), ...(agent ? { agent } : {}) };
+
+    this.gateway.emitConversationCreated(conversationDto);
+    this.gateway.emitMessageCreated(messageDto);
+    this.gateway.emitConversationInvited(session.sessionToken, conversationDto, messageDto);
+
+    return { conversation: conversationDto, message: messageDto };
+  }
+
+  private mapConversation(conversation: Conversation): ConversationDto {
+    return {
+      id: conversation.id,
+      organizationId: conversation.organizationId,
+      visitorId: conversation.visitorId,
+      contactId: conversation.contactId,
+      widgetId: conversation.widgetId,
+      departmentId: conversation.departmentId,
+      assignedAgentId: conversation.assignedAgentId,
+      source: conversation.source,
+      channel: conversation.channel,
+      channelThreadId: conversation.channelThreadId,
+      status: conversation.status,
+      priority: conversation.priority,
+      subject: conversation.subject,
+      locale: conversation.locale,
+      metadata: (conversation.metadata as Record<string, unknown>) ?? {},
+      firstResponseAt: conversation.firstResponseAt,
+      lastMessageAt: conversation.lastMessageAt,
+      resolvedAt: conversation.resolvedAt,
+      closedAt: conversation.closedAt,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt
+    };
+  }
+
+  private mapMessage(message: Message): MessageDto {
+    return {
+      id: message.id,
+      organizationId: message.organizationId,
+      conversationId: message.conversationId,
+      senderType: message.senderType,
+      senderVisitorId: message.senderVisitorId,
+      senderMembershipId: message.senderMembershipId,
+      type: message.type,
+      visibility: message.visibility,
+      status: message.status,
+      body: message.body,
+      idempotencyKey: message.idempotencyKey,
+      metadata: (message.metadata as Record<string, unknown>) ?? {},
+      createdAt: message.createdAt,
+      editedAt: message.editedAt,
+      deletedAt: message.deletedAt
+    };
   }
 }

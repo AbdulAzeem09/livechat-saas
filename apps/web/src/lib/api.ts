@@ -502,6 +502,23 @@ export function listLiveVisitors(
   });
 }
 
+/** Traffic → Start chat: open a conversation with a browsing visitor before they've said anything. */
+export function startVisitorChat(
+  organizationId: string,
+  visitorId: string,
+  accessToken: string,
+  message?: string
+): Promise<{ conversation: { id: string }; message: { id: string } }> {
+  return apiRequest<{ conversation: { id: string }; message: { id: string } }>(
+    `/organizations/${organizationId}/visitors/${visitorId}/start-chat`,
+    {
+      accessToken,
+      method: "POST",
+      body: JSON.stringify(message ? { message } : {})
+    }
+  );
+}
+
 export function suggestReply(
   organizationId: string,
   conversationId: string,

@@ -852,7 +852,7 @@ export class WidgetsService {
     publicKey: string,
     dto: { sessionToken: string; pageUrl?: string; pageTitle?: string },
     metadata: WidgetRequestMetadata
-  ): Promise<{ ok: true }> {
+  ): Promise<{ ok: true; activeConversationId: string | null }> {
     const widget = await this.getPublicWidget(publicKey);
     const session = await this.getSessionOrThrow(widget, dto.sessionToken);
 
@@ -883,7 +883,21 @@ export class WidgetsService {
       }
     }
 
-    return { ok: true };
+    // An agent may have opened a proactive chat with this visitor since their last heartbeat —
+    // this is the fallback for when the real-time push missed them (page reload, dropped
+    // socket). It costs one indexed lookup on every heartbeat to never leave a started chat
+    // stranded.
+    const activeConversation = await this.prisma.conversation.findFirst({
+      where: {
+        organizationId: widget.organizationId,
+        visitorId: session.visitorId,
+        status: { in: [ConversationStatus.QUEUED, ConversationStatus.OPEN, ConversationStatus.PENDING] }
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true }
+    });
+
+    return { ok: true, activeConversationId: activeConversation?.id ?? null };
   }
 
   async validateVisitorSocket(
@@ -2314,14 +2328,36 @@ function buildWidgetScript(): string {
       }),
       mode: "cors",
       keepalive: true
-    }).catch(function () {});
+    })
+      .then(function (response) { return response.json(); })
+      .then(function (result) { adoptInvitedConversation(result && result.activeConversationId); })
+      .catch(function () {});
   }
 
-  // Track every visitor on the site (even if they never open the chat),
-  // so agents can see who is live and on which page.
+  /**
+   * Pick up a chat an agent opened proactively (Traffic → Start chat), if the real-time push
+   * below missed us — the page had been reloaded, or the socket had dropped. A no-op for a
+   * conversation we already know about, so a heartbeat firing every 25 seconds doesn't
+   * re-announce the same chat on every tick.
+   */
+  function adoptInvitedConversation(conversationId) {
+    if (!conversationId || conversationId === state.conversationId) return;
+    state.conversationId = conversationId;
+    localStorage.setItem(storagePrefix + "conversationId", conversationId);
+    if (state.socket) state.socket.emit("conversation.join", { conversationId: conversationId });
+    loadHistory();
+    openPanel();
+    widgetEmit("chatStarted", { conversationId: conversationId });
+  }
+
+  // Track every visitor on the site (even if they never open the chat), so agents can see
+  // who is live and on which page — and keep the socket connected for everyone too, not only
+  // visitors who have opened the panel, so a proactive "Start chat" from Traffic reaches them
+  // the moment it's sent rather than on their next heartbeat.
   ensureSession()
     .then(function () {
       sendHeartbeat();
+      connectSocket();
       setInterval(function () {
         if (document.visibilityState !== "hidden") sendHeartbeat();
       }, 25000);
@@ -2358,6 +2394,17 @@ function buildWidgetScript(): string {
         if (payload.isTyping) showAgentTyping();
         else hideAgentTyping();
       }
+    });
+    // An agent started this one from Traffic, before the visitor asked for anything — open
+    // the panel for them rather than leaving it in a bubble they have no reason to click.
+    state.socket.on("conversation.invited", function (payload) {
+      if (!payload || !payload.conversation || state.conversationId === payload.conversation.id) return;
+      state.conversationId = payload.conversation.id;
+      localStorage.setItem(storagePrefix + "conversationId", state.conversationId);
+      state.socket.emit("conversation.join", { conversationId: state.conversationId });
+      openPanel();
+      if (payload.message) renderMessage(payload.message);
+      widgetEmit("chatStarted", { conversationId: state.conversationId });
     });
   }
 

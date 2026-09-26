@@ -102,7 +102,7 @@ export default function HomePage() {
       </Link>
 
       {/* ------------------------------------------------------------- hero */}
-      <section className="border-b border-[#E3E9F2] bg-white px-5 pb-16 pt-12 md:px-8 md:pb-20 md:pt-16">
+      <section className="overflow-hidden border-b border-[#E3E9F2] bg-white px-5 pb-16 pt-12 md:px-8 md:pb-20 md:pt-16">
         <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1fr_1.05fr]">
           <div>
             <h1 className="text-balance text-[44px] font-bold leading-[1.02] tracking-[-0.035em] md:text-[68px]">

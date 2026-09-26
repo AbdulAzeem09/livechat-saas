@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ConversationDto, MessageDto } from "../../conversations/dto/conversation-response.dto";
 
 export class LiveVisitorDto {
   @ApiProperty()
@@ -66,4 +67,12 @@ export class LiveVisitorDto {
     description: "Id of an active conversation with this visitor, if any"
   })
   activeConversationId!: string | null;
+}
+
+export class StartChatResponseDto {
+  @ApiProperty({ type: ConversationDto })
+  conversation!: ConversationDto;
+
+  @ApiProperty({ type: MessageDto })
+  message!: MessageDto;
 }

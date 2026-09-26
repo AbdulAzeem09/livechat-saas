@@ -126,6 +126,7 @@ import {
   listConversations,
   listDepartments,
   listLiveVisitors,
+  startVisitorChat,
   clearVisitorData as clearVisitorDataRequest,
   exportOrgData,
   listMembers,
@@ -3561,12 +3562,14 @@ export function DashboardShell() {
 
               {activeScreen === "engage" && activeSecondary === "Traffic" && (
                 <TrafficScreen
+                  accessToken={session?.accessToken ?? null}
                   chatLink={chatLink}
                   liveVisitors={liveVisitors}
                   members={members}
                   onAction={handleAction}
                   onCopy={handleCopy}
                   onOpenConversation={handleOpenConversationById}
+                  organizationId={activeOrganization?.id ?? null}
                   typingPreviews={visitorPreviews}
                   voiceAlert={voiceAlert}
                   onChangeVoiceAlert={setVoiceAlert}
@@ -6053,27 +6056,49 @@ function NetworkBadge({ network }: { network: string | null }): ReactElement | n
 }
 
 function TrafficScreen({
+  accessToken,
   chatLink,
   liveVisitors,
   members,
   onAction,
   onCopy,
   onOpenConversation,
+  organizationId,
   typingPreviews,
   voiceAlert,
   onChangeVoiceAlert
 }: {
+  accessToken: string | null;
   chatLink: string;
   liveVisitors: LiveVisitor[];
   members: OrganizationMember[];
   onAction: (message: string) => void;
   onCopy: (text: string, copiedMessage?: string) => Promise<void>;
   onOpenConversation: (conversationId: string) => void;
+  organizationId: string | null;
   typingPreviews: Record<string, string>;
   voiceAlert: "off" | VoiceGender;
   onChangeVoiceAlert: (value: "off" | VoiceGender) => void;
 }) {
   const [tab, setTab] = useState<(typeof TRAFFIC_TABS)[number]>("All customers");
+  const [startingChatFor, setStartingChatFor] = useState<string | null>(null);
+
+  async function startChat(visitor: LiveVisitor) {
+    if (!accessToken || !organizationId || startingChatFor) {
+      return;
+    }
+
+    setStartingChatFor(visitor.id);
+    try {
+      const result = await startVisitorChat(organizationId, visitor.id, accessToken);
+      onAction(`Chat started with ${visitor.name || visitor.ip || "the visitor"}.`);
+      onOpenConversation(result.conversation.id);
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not start that chat.");
+    } finally {
+      setStartingChatFor(null);
+    }
+  }
 
   const inTab = (visitor: LiveVisitor, tabName: (typeof TRAFFIC_TABS)[number]) => {
     if (tabName === "All customers") return true;
@@ -6206,11 +6231,12 @@ function TrafficScreen({
                     </button>
                   ) : visitor.activity === "Browsing" ? (
                     <button
-                      className="rounded-md bg-[#4ea2ff] px-3 py-1.5 text-xs font-bold text-black hover:bg-[#66adff]"
-                      onClick={() => onAction(`Chat invite sent to ${name}.`)}
+                      className="rounded-md bg-[#4ea2ff] px-3 py-1.5 text-xs font-bold text-black hover:bg-[#66adff] disabled:opacity-50"
+                      disabled={startingChatFor === visitor.id}
+                      onClick={() => void startChat(visitor)}
                       type="button"
                     >
-                      Start chat
+                      {startingChatFor === visitor.id ? "Starting…" : "Start chat"}
                     </button>
                   ) : (
                     <span className="text-white/30">–</span>

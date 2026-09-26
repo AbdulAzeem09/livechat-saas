@@ -123,12 +123,12 @@ export class WidgetsController {
   @Header("access-control-allow-origin", "*")
   @ApiOperation({ summary: "Record a visitor heartbeat (keeps the visitor marked online + tracks page)" })
   @ApiParam({ name: "publicKey" })
-  @ApiOkResponse({ description: "Heartbeat recorded" })
+  @ApiOkResponse({ description: "Heartbeat recorded, and any conversation an agent has already opened for them" })
   heartbeat(
     @Param("publicKey") publicKey: string,
     @Body() dto: WidgetHeartbeatDto,
     @Req() request: Request
-  ): Promise<{ ok: true }> {
+  ): Promise<{ ok: true; activeConversationId: string | null }> {
     return this.widgetsService.recordHeartbeat(publicKey, dto, this.getMetadata(request));
   }
 
