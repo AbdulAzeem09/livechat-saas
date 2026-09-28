@@ -3350,9 +3350,9 @@ export function DashboardShell() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-black text-white">
+    <main className="flex h-screen flex-col overflow-hidden bg-black text-white">
       {billing?.entitlements && !billing.entitlements.active && (
-        <div className="flex flex-wrap items-center justify-center gap-3 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">
           <span>{billing.entitlements.message ?? "Your chat widget is paused."}</span>
           <button
             className="rounded-md bg-white px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-white/90"
@@ -3385,7 +3385,6 @@ export function DashboardShell() {
       )}
 
       <GlobalTopBar
-        bannerVisible={showNotifBanner}
         isNotificationOpen={isNotificationOpen}
         unreadNotifications={unreadNotifications}
         onCreateChat={() => void handleCreateConversation()}
@@ -3403,10 +3402,7 @@ export function DashboardShell() {
       />
 
       <div
-        className={cn(
-          "grid grid-cols-[40px_minmax(0,1fr)] [grid-template-rows:minmax(0,1fr)] lg:grid-cols-[40px_220px_minmax(0,1fr)]",
-          showNotifBanner ? "mt-[52px] h-[calc(100dvh-52px)]" : "mt-7 h-[calc(100dvh-28px)]"
-        )}
+        className="grid min-h-0 flex-1 grid-cols-[40px_minmax(0,1fr)] [grid-template-rows:minmax(0,1fr)] lg:grid-cols-[40px_220px_minmax(0,1fr)]"
       >
         <IconRail
           activeScreen={activeScreen}
@@ -4753,7 +4749,7 @@ function AuditLogPanel({
 
 function VerifyEmailBanner({ email, onResend }: { email: string; onResend: () => void }) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 bg-amber-500 px-3 py-1.5 text-xs font-semibold text-black">
+    <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 bg-amber-500 px-3 py-1.5 text-xs font-semibold text-black">
       <span>
         Confirm your email ({email}) — we sent you a link. You can keep working meanwhile; confirming
         secures your account and lets you reset your password.
@@ -4771,7 +4767,7 @@ function VerifyEmailBanner({ email, onResend }: { email: string; onResend: () =>
 
 function NeverMissBanner({ onClose, onEnable }: { onClose: () => void; onEnable: () => void }) {
   return (
-    <div className="fixed inset-x-0 top-0 z-40 flex h-6 items-center justify-center gap-3 bg-[#0a84ff] px-3 text-xs font-semibold text-white">
+    <div className="relative z-40 flex h-6 shrink-0 items-center justify-center gap-3 bg-[#0a84ff] px-3 text-xs font-semibold text-white">
       <span>Never miss a chat!</span>
       <button
         className="inline-flex items-center gap-1.5 rounded-md bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#0a1f44] transition hover:bg-white/90"
@@ -4794,7 +4790,6 @@ function NeverMissBanner({ onClose, onEnable }: { onClose: () => void; onEnable:
 }
 
 function GlobalTopBar({
-  bannerVisible,
   isNotificationOpen,
   unreadNotifications,
   onCreateChat,
@@ -4804,7 +4799,6 @@ function GlobalTopBar({
   searchQuery,
   user
 }: {
-  bannerVisible: boolean;
   isNotificationOpen: boolean;
   unreadNotifications: number;
   onCreateChat: () => void;
@@ -4815,12 +4809,7 @@ function GlobalTopBar({
   user: AuthUser | null;
 }) {
   return (
-    <div
-      className={cn(
-        "fixed inset-x-0 z-30 flex h-7 items-center justify-center bg-black",
-        bannerVisible ? "top-6" : "top-0"
-      )}
-    >
+    <div className="relative z-30 flex h-7 shrink-0 items-center justify-center bg-black">
       <label className="relative hidden h-7 w-[420px] max-w-[42vw] items-center sm:flex">
         <Search className="pointer-events-none absolute left-3 h-4 w-4 text-white/80" aria-hidden />
         <input
