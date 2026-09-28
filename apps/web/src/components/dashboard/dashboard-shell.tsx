@@ -34,6 +34,7 @@ import {
   Database,
   Download,
   Globe2,
+  History,
   Home,
   Languages,
   Link2,
@@ -127,6 +128,7 @@ import {
   listDepartments,
   listLiveVisitors,
   startVisitorChat,
+  getVisitorDetail,
   clearVisitorData as clearVisitorDataRequest,
   exportOrgData,
   listMembers,
@@ -223,6 +225,7 @@ import type {
   Goal,
   KnowledgeArticle,
   LiveVisitor,
+  VisitorDetail,
   Ticket,
   Webhook,
   Message,
@@ -3516,6 +3519,8 @@ export function DashboardShell() {
                   onRequestSummary={handleSummariseConversation}
                   onEnhanceText={handleEnhanceText}
                   onRequestAutoTag={handleAutoTagConversation}
+                  accessToken={session?.accessToken ?? null}
+                  organizationId={activeOrganization?.id ?? null}
                   cannedResponses={cannedResponses}
                   chatLink={chatLink}
                   composer={composer}
@@ -5193,12 +5198,14 @@ function ChatsScreen({
   onRequestSummary,
   onEnhanceText,
   onRequestAutoTag,
+  accessToken,
   cannedResponses,
   chatLink,
   composer,
   connection,
   conversations,
   myMembershipId,
+  organizationId,
   isCreating,
   isMessagesLoading,
   isSending,
@@ -5230,12 +5237,14 @@ function ChatsScreen({
   onRequestSummary: (conversationId: string) => Promise<ConversationSummary | null>;
   onEnhanceText: (conversationId: string, text: string) => Promise<string | null>;
   onRequestAutoTag: (conversationId: string) => Promise<void>;
+  accessToken: string | null;
   cannedResponses: CannedResponse[];
   chatLink: string;
   composer: string;
   connection: "connecting" | "online" | "offline";
   conversations: Conversation[];
   myMembershipId: string | null;
+  organizationId: string | null;
   isCreating: boolean;
   isMessagesLoading: boolean;
   isSending: boolean;
@@ -5277,6 +5286,30 @@ function ChatsScreen({
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [isSummarising, setIsSummarising] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
+  const [visitorDetail, setVisitorDetail] = useState<VisitorDetail | null>(null);
+  const visitorId = selectedConversation?.visitorId ?? null;
+
+  // The identity panel beside a chat: fetched once per visitor, not on every message.
+  useEffect(() => {
+    if (!accessToken || !organizationId || !visitorId) {
+      setVisitorDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    setVisitorDetail(null);
+    getVisitorDetail(organizationId, visitorId, accessToken)
+      .then((detail) => {
+        if (!cancelled) setVisitorDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setVisitorDetail(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, organizationId, visitorId]);
 
   async function onImprove() {
     if (!selectedConversation || !composer.trim()) {
@@ -5319,7 +5352,7 @@ function ChatsScreen({
   const onClearSummary = () => setSummary(null);
 
   return (
-    <div className="grid min-h-full grid-cols-1 bg-[#1f1f23] text-white md:h-full md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden 2xl:grid-cols-[320px_minmax(0,1fr)_340px]">
+    <div className="grid min-h-full grid-cols-1 bg-[#1f1f23] text-white md:h-full md:grid-cols-[280px_minmax(0,1fr)] md:overflow-hidden xl:grid-cols-[280px_minmax(0,1fr)_320px]">
       <aside className="flex flex-col border-b border-[#111214] bg-[#202024] md:h-full md:min-h-0 md:border-b-0 md:border-r">
         <div className="flex h-12 items-center justify-between border-b border-[#303036] px-4">
           <div className="flex items-center gap-2">
@@ -5403,7 +5436,7 @@ function ChatsScreen({
         </div>
       </aside>
 
-      <section className="flex min-h-[420px] flex-col border-b border-[#111214] md:h-full md:min-h-0 md:border-b-0 2xl:border-r">
+      <section className="flex min-h-[420px] flex-col border-b border-[#111214] md:h-full md:min-h-0 md:border-b-0 xl:border-r">
         {selectedConversation ? (
           <>
             {selectedConversation.assignedAgentId &&
@@ -5746,7 +5779,7 @@ function ChatsScreen({
         )}
       </section>
 
-      <aside className="hidden bg-[#202024] 2xl:block">
+      <aside className="hidden overflow-y-auto bg-[#202024] xl:block">
         <div className="flex h-14 items-center justify-between border-b border-[#303036] px-5">
           <div className="flex gap-4">
             <UserRound className="h-5 w-5 text-white/80" aria-hidden />
@@ -5758,6 +5791,8 @@ function ChatsScreen({
         </div>
 
         <div className="space-y-6 px-5 py-6">
+          {selectedConversation && <VisitorIdentityCard detail={visitorDetail} />}
+
           <div className="rounded-lg border border-[#303036] p-4">
             <p className="text-sm font-bold">Conversation</p>
             {selectedConversation ? (
@@ -5890,6 +5925,92 @@ function ChatsScreen({
   );
 }
 
+/**
+ * Who is on the other end of the chat. No map: a photographic tile needs coordinates we don't
+ * geocode (and a paid API key to fetch them), so location is shown as the plain city/region/
+ * country the same lookup that already feeds Traffic gives us — accurate, just not a picture.
+ */
+function VisitorIdentityCard({ detail }: { detail: VisitorDetail | null }) {
+  if (!detail) {
+    return (
+      <div className="rounded-lg border border-[#303036] p-4">
+        <div className="mx-auto h-14 w-14 animate-pulse rounded-full bg-[#303036]" />
+        <div className="mx-auto mt-3 h-4 w-32 animate-pulse rounded bg-[#303036]" />
+      </div>
+    );
+  }
+
+  const name = detail.name?.trim() || detail.email || "Website visitor";
+  const location = [detail.city, detail.region, detail.country].filter(Boolean).join(", ");
+
+  let localTime: string | null = null;
+  if (detail.timezone) {
+    try {
+      localTime = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: detail.timezone
+      }).format(new Date());
+    } catch {
+      localTime = null;
+    }
+  }
+
+  let cameFrom = "Direct — no referring site";
+  if (detail.referrer) {
+    try {
+      cameFrom = new URL(detail.referrer).hostname;
+    } catch {
+      cameFrom = detail.referrer;
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-[#303036] p-4">
+      <div className="flex flex-col items-center text-center">
+        <span
+          className={cn(
+            "grid h-14 w-14 place-items-center rounded-full text-lg font-bold text-white",
+            avatarColor(name)
+          )}
+        >
+          {name.charAt(0).toUpperCase()}
+        </span>
+        <p className="mt-3 text-base font-bold">{name}</p>
+        {detail.email && detail.name && <p className="text-xs text-white/50">{detail.email}</p>}
+        {location && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-white/70">
+            <MapPin className="h-3.5 w-3.5" aria-hidden /> {location}
+          </p>
+        )}
+        {localTime && (
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-white/50">
+            <Clock3 className="h-3.5 w-3.5" aria-hidden /> {localTime} local time
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 space-y-2.5 border-t border-[#303036] pt-4 text-xs">
+        <p className="font-bold text-white/60">Additional info</p>
+        <div className="flex items-center gap-2 text-white/75">
+          <History className="h-3.5 w-3.5 shrink-0 text-white/40" aria-hidden />
+          {detail.visitCount > 1
+            ? `Returning visitor: ${detail.visitCount} visits, ${detail.chatCount} chat${detail.chatCount === 1 ? "" : "s"}`
+            : "New visitor"}
+        </div>
+        <div className="flex items-center gap-2 text-white/75">
+          <Clock3 className="h-3.5 w-3.5 shrink-0 text-white/40" aria-hidden />
+          Last seen: {relativeTime(detail.lastSeenAt)}
+        </div>
+        <div className="flex items-center gap-2 text-white/75">
+          <Globe2 className="h-3.5 w-3.5 shrink-0 text-white/40" aria-hidden />
+          Came from: {cameFrom}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChannelSetup({ onAction }: { onAction: (message: string) => void }) {
   return (
     <div className="flex h-full items-center justify-center px-6 py-10 text-center">
@@ -5953,7 +6074,11 @@ function relativeTime(value: string | null): string {
     return `${Math.round(seconds / 60)}m ago`;
   }
 
-  return `${Math.round(seconds / 3600)}h ago`;
+  if (seconds < 86400) {
+    return `${Math.round(seconds / 3600)}h ago`;
+  }
+
+  return `${Math.round(seconds / 86400)}d ago`;
 }
 
 function timeOnPages(startIso: string | null, endIso: string | null): string {

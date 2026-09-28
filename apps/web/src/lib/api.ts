@@ -24,6 +24,7 @@ import type {
   Ticket,
   Webhook,
   LiveVisitor,
+  VisitorDetail,
   Message,
   MessageType,
   MessageVisibility,
@@ -517,6 +518,17 @@ export function startVisitorChat(
       body: JSON.stringify(message ? { message } : {})
     }
   );
+}
+
+/** The panel beside an open chat: who they are, where they are, whether they've chatted before. */
+export function getVisitorDetail(
+  organizationId: string,
+  visitorId: string,
+  accessToken: string
+): Promise<VisitorDetail> {
+  return apiRequest<VisitorDetail>(`/organizations/${organizationId}/visitors/${visitorId}`, {
+    accessToken
+  });
 }
 
 export function suggestReply(

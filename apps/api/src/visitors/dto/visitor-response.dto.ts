@@ -76,3 +76,48 @@ export class StartChatResponseDto {
   @ApiProperty({ type: MessageDto })
   message!: MessageDto;
 }
+
+/** The panel beside a chat: who they are, where they are, and whether they've been here before. */
+export class VisitorDetailDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  name!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  email!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  phone!: string | null;
+
+  @ApiProperty()
+  firstSeenAt!: Date;
+
+  @ApiPropertyOptional({ nullable: true })
+  lastSeenAt!: Date | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  country!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  region!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  city!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: "The visitor's browser timezone, if the widget reported one" })
+  timezone!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: "Where they came from — the referring page" })
+  referrer!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: "The first page they landed on" })
+  landingPage!: string | null;
+
+  @ApiProperty({ description: "How many separate visits this browser/device has made" })
+  visitCount!: number;
+
+  @ApiProperty({ description: "How many chats they've started, ever" })
+  chatCount!: number;
+}

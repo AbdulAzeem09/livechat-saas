@@ -14,7 +14,7 @@ import { CurrentOrganization } from "../organizations/decorators/current-organiz
 import { OrganizationAccessGuard } from "../organizations/guards/organization-access.guard";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
 import { StartVisitorChatDto } from "./dto/start-visitor-chat.dto";
-import { LiveVisitorDto, StartChatResponseDto } from "./dto/visitor-response.dto";
+import { LiveVisitorDto, StartChatResponseDto, VisitorDetailDto } from "./dto/visitor-response.dto";
 import { VisitorsService } from "./visitors.service";
 
 @ApiTags("Visitors")
@@ -31,6 +31,19 @@ export class VisitorsController {
   @ApiOkResponse({ type: [LiveVisitorDto] })
   listLive(@Param("organizationId") organizationId: string): Promise<LiveVisitorDto[]> {
     return this.visitorsService.listLive(organizationId);
+  }
+
+  @Get(":visitorId")
+  @Permissions("chat:read")
+  @ApiOperation({ summary: "Who they are, where they are, and whether they've chatted before" })
+  @ApiParam({ name: "organizationId" })
+  @ApiParam({ name: "visitorId" })
+  @ApiOkResponse({ type: VisitorDetailDto })
+  getDetail(
+    @Param("organizationId") organizationId: string,
+    @Param("visitorId") visitorId: string
+  ): Promise<VisitorDetailDto> {
+    return this.visitorsService.getDetail(organizationId, visitorId);
   }
 
   @Post(":visitorId/start-chat")

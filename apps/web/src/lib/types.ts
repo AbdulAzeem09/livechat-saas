@@ -392,6 +392,23 @@ export interface LiveVisitor {
   activeConversationId: string | null;
 }
 
+export interface VisitorDetail {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  timezone: string | null;
+  referrer: string | null;
+  landingPage: string | null;
+  visitCount: number;
+  chatCount: number;
+}
+
 export interface ReportEngagement {
   visitors: number;
   chats: number;

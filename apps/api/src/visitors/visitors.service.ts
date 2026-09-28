@@ -16,7 +16,7 @@ import { ConversationsGateway } from "../conversations/conversations.gateway";
 import type { ConversationDto, MessageDto } from "../conversations/dto/conversation-response.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentProfilesService } from "../widgets/agent-profiles.service";
-import { LiveVisitorDto } from "./dto/visitor-response.dto";
+import { LiveVisitorDto, VisitorDetailDto } from "./dto/visitor-response.dto";
 
 /** Visitors seen within this window appear in Traffic (browsing now or recently left). */
 const LIVE_WINDOW_MS = 30 * 60_000;
@@ -84,6 +84,49 @@ export class VisitorsService {
       pageViews: pageViewCount.get(visitor.id) ?? 0,
       conversation: activeConversation.get(visitor.id) ?? null
     }));
+  }
+
+  /** The panel beside an open chat: who they are, where they are, and whether they've been here before. */
+  async getDetail(organizationId: string, visitorId: string): Promise<VisitorDetailDto> {
+    const visitor = await this.prisma.visitor.findFirst({ where: { id: visitorId, organizationId } });
+
+    if (!visitor) {
+      throw new NotFoundException("Visitor not found");
+    }
+
+    const [latestSession, visitCount, chatCount] = await Promise.all([
+      this.prisma.visitorSession.findFirst({
+        where: { organizationId, visitorId },
+        orderBy: { startedAt: "desc" }
+      }),
+      this.prisma.visitorSession.count({ where: { organizationId, visitorId } }),
+      this.prisma.conversation.count({ where: { organizationId, visitorId } })
+    ]);
+
+    // The widget reports the visitor's own timezone once, at session start — there is no
+    // live geocoding here, just what they told us about themselves.
+    const sessionMeta =
+      latestSession?.metadata && typeof latestSession.metadata === "object" && !Array.isArray(latestSession.metadata)
+        ? (latestSession.metadata as Record<string, unknown>)
+        : {};
+    const timezone = typeof sessionMeta.timezone === "string" && sessionMeta.timezone ? sessionMeta.timezone : null;
+
+    return {
+      id: visitor.id,
+      name: visitor.name,
+      email: visitor.email,
+      phone: visitor.phone,
+      firstSeenAt: visitor.firstSeenAt,
+      lastSeenAt: visitor.lastSeenAt,
+      country: latestSession?.country ?? null,
+      region: latestSession?.region ?? null,
+      city: latestSession?.city ?? null,
+      timezone,
+      referrer: latestSession?.referrer ?? null,
+      landingPage: latestSession?.landingPage ?? null,
+      visitCount,
+      chatCount
+    };
   }
 
   private mapVisitor(
