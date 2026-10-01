@@ -889,6 +889,12 @@ export function DashboardShell() {
   const seenVisitorIdsRef = useRef<Set<string>>(new Set());
   const voiceAlertRef = useRef<"off" | VoiceGender>("off");
   const visitorPreviewTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Arrivals are announced in one batch per window: a hundred people landing together is one
+  // chime saying "100 new visitors", not a hundred chimes fighting each other.
+  const arrivalBurstRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({
+    count: 0,
+    timer: null
+  });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
@@ -1678,6 +1684,51 @@ export function DashboardShell() {
       }
     );
 
+    // Someone landed on the site. This arrives the instant it happens, on whichever screen the
+    // agent is looking at — the ten-second Traffic poll below is only a fallback for when the
+    // socket is down.
+    socket.on("visitor.arrived", (payload: { visitor?: LiveVisitor }) => {
+      const visitor = payload.visitor;
+
+      if (!visitor?.id) {
+        return;
+      }
+
+      const seen = seenVisitorIdsRef.current;
+      const isNew = !seen.has(visitor.id);
+      seen.add(visitor.id);
+
+      setLiveVisitors((current) =>
+        current.some((entry) => entry.id === visitor.id)
+          ? current.map((entry) => (entry.id === visitor.id ? { ...entry, ...visitor } : entry))
+          : [visitor, ...current]
+      );
+
+      if (!isNew || voiceAlertRef.current === "off") {
+        return;
+      }
+
+      // Hold the announcement open briefly so a burst becomes one spoken count. The chime
+      // fires on the first arrival so the alert itself is never delayed.
+      const burst = arrivalBurstRef.current;
+      burst.count += 1;
+
+      if (burst.timer) {
+        return;
+      }
+
+      playChime();
+      burst.timer = setTimeout(() => {
+        const count = burst.count;
+        burst.count = 0;
+        burst.timer = null;
+
+        if (voiceAlertRef.current !== "off") {
+          speak(count > 1 ? `${count} new visitors` : "New visitor", voiceAlertRef.current);
+        }
+      }, 1200);
+    });
+
     // Message sneak-peek: what any visitor is typing (even before a chat exists).
     socket.on(
       "visitor.preview",
@@ -1711,6 +1762,14 @@ export function DashboardShell() {
     );
 
     return () => {
+      const burst = arrivalBurstRef.current;
+
+      if (burst.timer) {
+        clearTimeout(burst.timer);
+        burst.timer = null;
+        burst.count = 0;
+      }
+
       socket.disconnect();
       socketRef.current = null;
     };

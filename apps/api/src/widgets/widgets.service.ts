@@ -318,6 +318,31 @@ export class WidgetsService {
       });
     }
 
+    // Tell the agents straight away. Geo is still resolving in the background, so this first
+    // picture is thin — the Traffic screen fills in country and city on its next refresh.
+    this.gateway.emitVisitorArrived(widget.organizationId, {
+      id: visitor.id,
+      name: visitor.name,
+      email: visitor.email,
+      firstSeenAt: visitor.firstSeenAt,
+      lastSeenAt: visitor.lastSeenAt,
+      sessionStartedAt: session.startedAt,
+      currentPage: dto.pageUrl ?? null,
+      currentPageTitle: dto.pageTitle ?? null,
+      landingPage: session.landingPage,
+      referrer: session.referrer,
+      country: null,
+      state: null,
+      city: null,
+      isp: null,
+      network: null,
+      ip: visitor.lastIp ?? session.ipAddress,
+      activity: "Browsing",
+      chattingWithAgentId: null,
+      pageViewCount: dto.pageUrl ? 1 : 0,
+      activeConversationId: null
+    });
+
     return {
       sessionToken: session.sessionToken,
       visitorId: visitor.id,

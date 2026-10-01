@@ -13,6 +13,7 @@ import type { AuthUser } from "../auth/types/auth-user";
 import { OrganizationAccessService } from "../organizations/organization-access.service";
 import type { OrganizationRequestContext } from "../organizations/types/organization-context";
 import { PrismaService } from "../prisma/prisma.service";
+import type { LiveVisitorDto } from "../visitors/dto/visitor-response.dto";
 import type { ConversationDto, MessageDto } from "./dto/conversation-response.dto";
 
 interface ChatSocketData {
@@ -206,6 +207,15 @@ export class ConversationsGateway {
         preview
       });
     return { ok: true };
+  }
+
+  /**
+   * Someone just opened a page on the customer's website. Agents hear about it the moment it
+   * happens rather than on the next poll — a live-visitor screen that is ten seconds behind is
+   * no use for catching someone before they leave.
+   */
+  emitVisitorArrived(organizationId: string, visitor: LiveVisitorDto): void {
+    this.server.to(this.organizationRoom(organizationId)).emit("visitor.arrived", { visitor });
   }
 
   emitConversationCreated(conversation: ConversationDto): void {
