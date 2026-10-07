@@ -13,8 +13,10 @@ export function configureApp(app: INestApplication, config: ConfigService): void
   const globalPrefix = config.getOrThrow<string>("API_GLOBAL_PREFIX");
   const corsOrigins = parseCorsOrigins(config.getOrThrow<string>("API_CORS_ORIGINS"));
 
-  // Trust the reverse proxy (host/CDN) so request.ip reflects the real visitor IP
-  // (from X-Forwarded-For) — needed for accurate geolocation once deployed.
+  // One hop: nginx sits in front and appends the connecting address to X-Forwarded-For.
+  // Express walks that list in from the right past the hops we trust, so request.ip is the
+  // address nginx saw rather than anything the caller put in the header themselves — which is
+  // what makes per-IP bans and rate limits worth having. Add a CDN in front and this becomes 2.
   const expressInstance = app.getHttpAdapter().getInstance() as {
     set?: (key: string, value: unknown) => void;
   };
