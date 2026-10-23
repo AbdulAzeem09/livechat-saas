@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -21,6 +22,7 @@ import {
   VisitorSession
 } from "@prisma/client";
 import { AutomationService } from "../automation/automation.service";
+import { CampaignsService } from "../campaigns/campaigns.service";
 import { safeFetch } from "../common/network/safe-fetch";
 import { ConversationsGateway } from "../conversations/conversations.gateway";
 import { EntitlementsService } from "../billing/entitlements.service";
@@ -58,8 +60,11 @@ export interface WidgetRequestMetadata {
 
 @Injectable()
 export class WidgetsService {
+  private readonly logger = new Logger(WidgetsService.name);
+
   constructor(
     private readonly automation: AutomationService,
+    private readonly campaigns: CampaignsService,
     private readonly config: ConfigService,
     private readonly gateway: ConversationsGateway,
     private readonly conversations: ConversationsService,
@@ -316,6 +321,7 @@ export class WidgetsService {
           ...(dto.referrer ? { referrer: dto.referrer } : {})
         }
       });
+      this.trackGoals(widget.organizationId, visitor.id, dto.pageUrl);
     }
 
     // Tell the agents straight away. Geo is still resolving in the background, so this first
@@ -905,6 +911,7 @@ export class WidgetsService {
             ...(dto.pageTitle ? { title: dto.pageTitle } : {})
           }
         });
+        this.trackGoals(widget.organizationId, session.visitorId, dto.pageUrl);
       }
     }
 
@@ -1075,6 +1082,17 @@ export class WidgetsService {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Count any goals this page completes, without making the visitor wait for it. Goal
+   * tracking is a reporting nicety; a page view must still be recorded and the widget must
+   * still answer even if it fails.
+   */
+  private trackGoals(organizationId: string, visitorId: string, url: string): void {
+    void this.campaigns.recordGoalProgress(organizationId, visitorId, url).catch((error) => {
+      this.logger.warn(`Goal tracking failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   /**

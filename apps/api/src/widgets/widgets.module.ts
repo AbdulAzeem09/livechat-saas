@@ -3,6 +3,7 @@ import { AppsModule } from "../apps/apps.module";
 import { AuthModule } from "../auth/auth.module";
 import { EntitlementsModule } from "../billing/entitlements.module";
 import { AutomationModule } from "../automation/automation.module";
+import { CampaignsModule } from "../campaigns/campaigns.module";
 import { ContactsModule } from "../contacts/contacts.module";
 import { ConversationsModule } from "../conversations/conversations.module";
 import { IntegrationsModule } from "../integrations/integrations.module";
@@ -20,6 +21,7 @@ import { WidgetsService } from "./widgets.service";
     AppsModule,
     AuthModule,
     AutomationModule,
+    CampaignsModule,
     EntitlementsModule,
     SchedulesModule,
     ContactsModule,

@@ -943,6 +943,22 @@ model Goal {
   @@map("goals")
 }
 
+/// One row the first time a visitor who chatted reaches a goal's target. The unique index on
+/// (goalId, visitorId) is what stops a refreshed thank-you page reporting five conversions.
+model GoalCompletion {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  goalId         String   @map("goal_id") @db.Uuid
+  visitorId      String   @map("visitor_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  valueCents     Int      @default(0) @map("value_cents")
+  completedAt    DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([goalId, visitorId])
+  @@index([organizationId, completedAt])
+  @@map("goal_completions")
+}
+
 model Sale {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid

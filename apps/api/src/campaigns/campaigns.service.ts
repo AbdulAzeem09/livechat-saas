@@ -7,6 +7,13 @@ import { CreateGoalDto } from "./dto/create-goal.dto";
 import { UpdateCampaignDto } from "./dto/update-campaign.dto";
 import { UpdateGoalDto } from "./dto/update-goal.dto";
 
+/**
+ * How long after a chat a conversion still counts as caused by it. Someone who chatted on
+ * Monday and bought on Wednesday was helped by that chat; someone who chatted last spring
+ * was not.
+ */
+const GOAL_ATTRIBUTION_WINDOW_MS = 30 * 24 * 60 * 60_000;
+
 /** Default campaigns seeded for a brand-new workspace (mirrors TalkZen defaults). */
 const DEFAULT_CAMPAIGNS: Array<Omit<CreateCampaignDto, "name"> & { name: string; displayedCount: number; chatsCount: number }> = [
   { name: "Exit Intent Campaign", type: "recurring", triggerType: "exit_intent", triggerValue: "", message: "Wait! Before you go — can we help?", displayedCount: 50, chatsCount: 0 },
@@ -175,6 +182,75 @@ export class CampaignsService {
       createdAt: campaign.createdAt,
       updatedAt: campaign.updatedAt
     };
+  }
+
+  // ---- Goal completion -----------------------------------------------------
+
+  /**
+   * A visitor just loaded a page. If it matches a live goal and that visitor has chatted
+   * recently, the chat earned a conversion.
+   *
+   * Only visitors who chatted count. A goal that fired for everyone reaching the thank-you
+   * page would measure the website rather than the support team, and nobody could act on
+   * the number.
+   *
+   * Counted once per visitor per goal, enforced by the unique index rather than a
+   * read-then-write check: two tabs loading the page together would both pass such a check
+   * and double-count.
+   */
+  async recordGoalProgress(organizationId: string, visitorId: string, url: string): Promise<void> {
+    const goals = await this.prisma.goal.findMany({ where: { organizationId, enabled: true } });
+    const matched = goals.filter((goal) => this.goalMatches(goal, url));
+
+    if (!matched.length) {
+      return;
+    }
+
+    // Their most recent chat, if it is recent enough to have plausibly led here.
+    const since = new Date(Date.now() - GOAL_ATTRIBUTION_WINDOW_MS);
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { organizationId, visitorId, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true }
+    });
+
+    if (!conversation) {
+      return;
+    }
+
+    for (const goal of matched) {
+      try {
+        await this.prisma.goalCompletion.create({
+          data: {
+            organizationId,
+            goalId: goal.id,
+            visitorId,
+            conversationId: conversation.id,
+            valueCents: goal.valueCents
+          }
+        });
+      } catch {
+        // Already counted for this visitor — the unique index did its job.
+        continue;
+      }
+
+      await this.prisma.goal.update({
+        where: { id: goal.id },
+        data: { completedCount: { increment: 1 } }
+      });
+    }
+  }
+
+  /**
+   * `target` is typed by hand in the dashboard, so it is matched loosely: "/thank-you" fires
+   * on "https://shop.example.com/thank-you?order=12" without anyone having to think about
+   * query strings. An empty target never matches — a half-finished goal firing on every page
+   * would be worse than one that does nothing.
+   */
+  private goalMatches(goal: Goal, url: string): boolean {
+    const target = goal.target.trim().toLowerCase();
+
+    return target ? url.toLowerCase().includes(target) : false;
   }
 
   private mapGoal(goal: Goal): GoalDto {
