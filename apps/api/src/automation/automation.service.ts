@@ -19,6 +19,18 @@ import { UpdateAutomationRuleDto } from "./dto/update-automation-rule.dto";
 
 /** Cap auto-replies per visitor message so misconfigured rules can't spam. */
 const MAX_REPLIES_PER_MESSAGE = 3;
+/**
+ * Words that say nothing about the subject. Without this, "What is your refund policy?"
+ * matches any article containing "your" — and an answer about refunds arrives as installation
+ * instructions.
+ */
+const STOP_WORDS = new Set([
+  "about", "after", "also", "been", "before", "being", "could", "does", "doing",
+  "from", "have", "here", "into", "just", "like", "more", "much", "only", "other", "over",
+  "please", "same", "should", "some", "such", "than", "that", "their", "them", "then",
+  "there", "these", "they", "thing", "things", "this", "those", "very", "want", "well",
+  "were", "what", "when", "where", "which", "while", "will", "with", "would", "your", "yours"
+]);
 /** After this many visitor messages in one chat, stop calling the paid AI (reply + intake analysis). */
 const MAX_AI_VISITOR_MESSAGES = 60;
 
@@ -220,7 +232,7 @@ export class AutomationService {
     return visitorMessages <= MAX_AI_VISITOR_MESSAGES;
   }
 
-  /** Chatbot fallback: find a published KB article matching the message and reply with it. */
+  /** Chatbot fallback: find the published KB article that best matches the message, and reply with it. */
   private async answerFromKnowledgeBase(
     organizationId: string,
     conversationId: string,
@@ -230,13 +242,13 @@ export class AutomationService {
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
-      .filter((word) => word.length > 3)
+      .filter((word) => word.length > 3 && !STOP_WORDS.has(word))
       .slice(0, 8);
     if (!words.length) {
       return;
     }
 
-    const article = await this.prisma.knowledgeArticle.findFirst({
+    const candidates = await this.prisma.knowledgeArticle.findMany({
       where: {
         organizationId,
         published: true,
@@ -245,8 +257,26 @@ export class AutomationService {
           { content: { contains: word, mode: "insensitive" as const } }
         ])
       },
-      orderBy: { views: "desc" }
+      orderBy: { views: "desc" },
+      take: 25
     });
+
+    // Any one word can match by accident, so rank on how much of the question an article
+    // actually covers rather than taking whichever row came back first. A word in the title
+    // counts double: an article called "Refund policy" is about refunds, while one that merely
+    // mentions the word in passing is not.
+    const article = candidates
+      .map((candidate) => {
+        const title = candidate.title.toLowerCase();
+        const content = candidate.content.toLowerCase();
+        const score = words.reduce(
+          (total, word) => total + (title.includes(word) ? 2 : 0) + (content.includes(word) ? 1 : 0),
+          0
+        );
+        return { candidate, score };
+      })
+      .sort((a, b) => b.score - a.score || b.candidate.views - a.candidate.views)[0]?.candidate;
+
     if (!article) {
       return;
     }
