@@ -1,0 +1,14 @@
+{
+  "name": "talkzen-qa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end suites that drive a running TalkZen over HTTP and sockets, exactly as a real client would",
+  "scripts": {
+    "test": "sh run-all.sh",
+    "test:api": "QA_SKIP_UI=1 sh run-all.sh"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0",
+    "socket.io-client": "^4.8.1"
+  }
+}
