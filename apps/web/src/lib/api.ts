@@ -31,6 +31,8 @@ import type {
   Organization,
   OrganizationMember,
   ReportSummary,
+  Role,
+  RoleAssignment,
   AiSkill,
   AiPerformance,
   ConversationRevenue,
@@ -1746,4 +1748,68 @@ async function readErrorBody(response: Response): Promise<ApiErrorBody | undefin
   } catch {
     return undefined;
   }
+}
+
+export function listRoles(organizationId: string, accessToken: string): Promise<Role[]> {
+  return apiRequest<Role[]>(`/organizations/${organizationId}/roles`, { accessToken });
+}
+
+export function createRole(
+  organizationId: string,
+  accessToken: string,
+  input: { name: string; description?: string; permissions: string[] }
+): Promise<Role> {
+  return apiRequest<Role>(`/organizations/${organizationId}/roles`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateRole(
+  organizationId: string,
+  roleId: string,
+  accessToken: string,
+  input: { name?: string; description?: string; permissions?: string[] }
+): Promise<Role> {
+  return apiRequest<Role>(`/organizations/${organizationId}/roles/${roleId}`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteRole(
+  organizationId: string,
+  roleId: string,
+  accessToken: string
+): Promise<{ success: true }> {
+  return apiRequest<{ success: true }>(`/organizations/${organizationId}/roles/${roleId}`, {
+    accessToken,
+    method: "DELETE"
+  });
+}
+
+export function assignRole(
+  organizationId: string,
+  membershipId: string,
+  roleId: string,
+  accessToken: string
+): Promise<RoleAssignment> {
+  return apiRequest<RoleAssignment>(
+    `/organizations/${organizationId}/members/${membershipId}/roles/${roleId}`,
+    { accessToken, method: "POST" }
+  );
+}
+
+export function revokeRole(
+  organizationId: string,
+  membershipId: string,
+  roleId: string,
+  accessToken: string
+): Promise<RoleAssignment> {
+  return apiRequest<RoleAssignment>(
+    `/organizations/${organizationId}/members/${membershipId}/roles/${roleId}`,
+    { accessToken, method: "DELETE" }
+  );
 }

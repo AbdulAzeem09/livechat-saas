@@ -167,6 +167,12 @@ import {
   removeSsoConnection,
   listContacts,
   listNotifications,
+  listRoles,
+  createRole as createRoleRequest,
+  updateRole as updateRoleRequest,
+  deleteRole as deleteRoleRequest,
+  assignRole as assignRoleRequest,
+  revokeRole as revokeRoleRequest,
   listSchedules,
   saveSchedule,
   markConversationRead,
@@ -232,6 +238,7 @@ import type {
   Organization,
   OrganizationMember,
   ReportSummary,
+  Role,
   WidgetInstall
 } from "@/lib/types";
 
@@ -2323,6 +2330,20 @@ export function DashboardShell() {
     }
   }
 
+  // Role changes alter what a member is allowed to do, and that list is baked into the member
+  // rows the whole dashboard reads from, so refetch rather than patch the row by hand.
+  async function refreshMembers() {
+    if (!session || !activeOrganization) {
+      return;
+    }
+
+    const loaded = await listMembers(activeOrganization.id, session.accessToken).catch(() => null);
+
+    if (loaded) {
+      setMembers(loaded);
+    }
+  }
+
   async function handleCreateDepartment(name: string) {
     if (!session || !activeOrganization) {
       return false;
@@ -3761,7 +3782,19 @@ export function DashboardShell() {
                 />
               )}
 
-              {activeScreen === "team" && activeSecondary !== "Work scheduler" && (
+              {activeScreen === "team" && activeSecondary === "Roles" && (
+                <RolesScreen
+                  accessToken={session?.accessToken ?? null}
+                  members={members}
+                  onAction={handleAction}
+                  onMembersChanged={() => void refreshMembers()}
+                  organizationId={activeOrganization?.id ?? null}
+                />
+              )}
+
+              {activeScreen === "team" &&
+                activeSecondary !== "Work scheduler" &&
+                activeSecondary !== "Roles" && (
                 <TeamScreen
                   departments={departments}
                   inviteLink={inviteLink}
@@ -15370,4 +15403,486 @@ function formatTime(value: string | null) {
 
 function getSocketUrl() {
   return socketUrl();
+}
+
+// Mirrors OWNER_PERMISSIONS in apps/api/src/auth/auth.constants.ts. The API validates every
+// permission it is sent, so an unknown string here is rejected rather than silently stored —
+// but a permission missing from this list is one nobody can grant from the dashboard.
+const PERMISSION_GROUPS: Array<{ title: string; permissions: Array<{ key: string; label: string; hint: string }> }> = [
+  {
+    title: "Chats",
+    permissions: [
+      { key: "chat:read", label: "Read chats", hint: "Open conversations and read the history" },
+      { key: "chat:write", label: "Reply to chats", hint: "Send messages to customers" },
+      { key: "chat:transfer", label: "Transfer chats", hint: "Hand a chat to another agent or group" }
+    ]
+  },
+  {
+    title: "Customers",
+    permissions: [
+      { key: "contacts:manage", label: "Manage customers", hint: "Edit customer records, notes and tags" },
+      { key: "tickets:manage", label: "Manage tickets", hint: "Create, assign and close tickets" }
+    ]
+  },
+  {
+    title: "Insights",
+    permissions: [{ key: "analytics:read", label: "View reports", hint: "Open the Reports section" }]
+  },
+  {
+    title: "Workspace",
+    permissions: [
+      { key: "organization:read", label: "View workspace", hint: "See the workspace name and details" },
+      { key: "organization:update", label: "Edit workspace", hint: "Rename the workspace and change its details" },
+      { key: "settings:manage", label: "Manage settings", hint: "Change widget, routing and workspace settings" },
+      { key: "members:manage", label: "Manage teammates", hint: "Invite agents and remove them" },
+      { key: "roles:manage", label: "Manage roles", hint: "Create roles and assign them — including this screen" },
+      { key: "billing:manage", label: "Manage billing", hint: "Change the plan, seats and payment details" }
+    ]
+  }
+];
+
+const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap((group) =>
+  group.permissions.map((permission) => permission.key)
+);
+
+function permissionLabel(key: string): string {
+  for (const group of PERMISSION_GROUPS) {
+    const match = group.permissions.find((permission) => permission.key === key);
+    if (match) {
+      return match.label;
+    }
+  }
+  return key;
+}
+
+// A member carries role keys for system roles and role names for custom ones (the API builds the
+// list as `role.key ?? role.name`), so that is what we match on here.
+function memberHasRole(member: OrganizationMember, role: Role): boolean {
+  return member.roles.includes(role.key ?? role.name);
+}
+
+function RolesScreen({
+  accessToken,
+  members,
+  onAction,
+  onMembersChanged,
+  organizationId
+}: {
+  accessToken: string | null;
+  members: OrganizationMember[];
+  onAction: (message: string) => void;
+  onMembersChanged: () => void;
+  organizationId: string | null;
+}) {
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftPermissions, setDraftPermissions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    void listRoles(organizationId, accessToken)
+      .then((loaded) => {
+        if (cancelled) return;
+        setRoles(loaded);
+        setSelectedId((current) => current ?? loaded[0]?.id ?? null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        onAction(error instanceof Error ? error.message : "Could not load roles");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // onAction is recreated on every render of the shell; depending on it would refetch endlessly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, organizationId]);
+
+  const selected = isCreating ? null : (roles.find((role) => role.id === selectedId) ?? null);
+
+  // Load the selected role into the draft fields whenever the selection changes.
+  useEffect(() => {
+    if (isCreating) {
+      return;
+    }
+    setDraftName(selected?.name ?? "");
+    setDraftDescription(selected?.description ?? "");
+    setDraftPermissions(selected?.permissions ?? []);
+  }, [isCreating, selected?.id, selected?.name, selected?.description, selected?.permissions]);
+
+  function startCreating() {
+    setIsCreating(true);
+    setDraftName("");
+    setDraftDescription("");
+    setDraftPermissions(["chat:read", "chat:write"]);
+  }
+
+  function cancelCreating() {
+    setIsCreating(false);
+    setSelectedId((current) => current ?? roles[0]?.id ?? null);
+  }
+
+  function togglePermission(key: string) {
+    setDraftPermissions((current) =>
+      current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key]
+    );
+  }
+
+  async function saveRole() {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+
+    const name = draftName.trim();
+
+    if (name.length < 2) {
+      onAction("Give the role a name of at least two characters.");
+      return;
+    }
+
+    if (draftPermissions.length === 0) {
+      onAction("Pick at least one permission, otherwise the role grants nothing.");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      if (isCreating) {
+        const description = draftDescription.trim();
+        const created = await createRoleRequest(organizationId, accessToken, {
+          name,
+          ...(description ? { description } : {}),
+          permissions: draftPermissions
+        });
+        setRoles((current) => [...current, created]);
+        setSelectedId(created.id);
+        setIsCreating(false);
+        onAction(`Role "${created.name}" created.`);
+      } else if (selected) {
+        const updated = await updateRoleRequest(organizationId, selected.id, accessToken, {
+          name,
+          description: draftDescription.trim(),
+          permissions: draftPermissions
+        });
+        setRoles((current) => current.map((role) => (role.id === updated.id ? updated : role)));
+        onAction(`Role "${updated.name}" saved.`);
+      }
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not save the role");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeRole(role: Role) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+
+    const holders = members.filter((member) => memberHasRole(member, role)).length;
+    const warning = holders
+      ? `Delete the role "${role.name}"? ${holders} ${holders === 1 ? "teammate loses" : "teammates lose"} the permissions it grants.`
+      : `Delete the role "${role.name}"?`;
+
+    if (!window.confirm(warning)) {
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      await deleteRoleRequest(organizationId, role.id, accessToken);
+      setRoles((current) => current.filter((entry) => entry.id !== role.id));
+      setSelectedId((current) => (current === role.id ? null : current));
+      onMembersChanged();
+      onAction(`Role "${role.name}" deleted.`);
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not delete the role");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function toggleMember(member: OrganizationMember, role: Role) {
+    if (!accessToken || !organizationId) {
+      return;
+    }
+
+    const hasRole = memberHasRole(member, role);
+    setBusyMemberId(member.id);
+
+    try {
+      if (hasRole) {
+        await revokeRoleRequest(organizationId, member.id, role.id, accessToken);
+        onAction(`${agentLabel(member)} no longer has "${role.name}".`);
+      } else {
+        await assignRoleRequest(organizationId, member.id, role.id, accessToken);
+        onAction(`${agentLabel(member)} now has "${role.name}".`);
+      }
+      onMembersChanged();
+    } catch (error) {
+      onAction(error instanceof Error ? error.message : "Could not change the role");
+    } finally {
+      setBusyMemberId(null);
+    }
+  }
+
+  const editing = isCreating || Boolean(selected && !selected.isSystem);
+  const panelRole = isCreating ? null : selected;
+
+  return (
+    <div className="grid min-h-full grid-cols-1 bg-white text-black xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section className="border-b border-slate-200 xl:border-b-0 xl:border-r">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <h2 className="text-lg font-bold">Roles</h2>
+          <button
+            className="rounded-md bg-[#0067ff] px-3 py-2 text-sm font-bold text-white hover:bg-[#0050c7]"
+            onClick={startCreating}
+            type="button"
+          >
+            + New role
+          </button>
+        </div>
+
+        {isLoading ? (
+          <p className="px-5 py-8 text-sm text-slate-500">Loading roles...</p>
+        ) : roles.length === 0 ? (
+          <p className="px-5 py-8 text-sm text-slate-500">No roles yet.</p>
+        ) : (
+          <ul>
+            {roles.map((role) => {
+              const holders = members.filter((member) => memberHasRole(member, role)).length;
+
+              return (
+                <li key={role.id}>
+                  <button
+                    className={cn(
+                      "w-full border-b border-slate-100 px-5 py-3 text-left hover:bg-slate-50",
+                      !isCreating && selectedId === role.id && "bg-slate-100"
+                    )}
+                    onClick={() => {
+                      setIsCreating(false);
+                      setSelectedId(role.id);
+                    }}
+                    type="button"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-sm font-bold">{role.name}</span>
+                      {role.isSystem ? (
+                        <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-600">
+                          Built in
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {role.permissions.length}{" "}
+                      {role.permissions.length === 1 ? "permission" : "permissions"} ·{" "}
+                      {holders} {holders === 1 ? "teammate" : "teammates"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="px-6 py-5">
+        {!isCreating && !selected ? (
+          <p className="text-sm text-slate-500">Pick a role on the left, or create a new one.</p>
+        ) : (
+          <>
+            <div className="mb-5">
+              <h3 className="text-base font-bold">
+                {isCreating ? "New role" : selected?.name}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {panelRole?.isSystem
+                  ? "This role ships with the product, so its permissions are fixed. You can still choose who has it."
+                  : "Tick the permissions this role grants, then choose who has it."}
+              </p>
+            </div>
+
+            {editing ? (
+              <div className="mb-6 grid max-w-xl gap-3">
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  Name
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#0067ff]"
+                    maxLength={80}
+                    onChange={(event) => setDraftName(event.target.value)}
+                    placeholder="Support Manager"
+                    value={draftName}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  Description (optional)
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#0067ff]"
+                    maxLength={500}
+                    onChange={(event) => setDraftDescription(event.target.value)}
+                    placeholder="Runs the support floor day to day"
+                    value={draftDescription}
+                  />
+                </label>
+              </div>
+            ) : panelRole?.description ? (
+              <p className="mb-6 max-w-xl text-sm text-slate-600">{panelRole.description}</p>
+            ) : null}
+
+            <div className="mb-6">
+              <h4 className="mb-3 text-sm font-bold">Permissions</h4>
+              <div className="grid gap-5 md:grid-cols-2">
+                {PERMISSION_GROUPS.map((group) => (
+                  <div key={group.title}>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                      {group.title}
+                    </p>
+                    <div className="grid gap-2">
+                      {group.permissions.map((permission) => {
+                        const checked = editing
+                          ? draftPermissions.includes(permission.key)
+                          : (panelRole?.permissions.includes(permission.key) ?? false);
+
+                        return (
+                          <label
+                            className={cn(
+                              "flex items-start gap-2 rounded-md border px-3 py-2",
+                              checked ? "border-blue-200 bg-blue-50" : "border-slate-200",
+                              !editing && "opacity-80"
+                            )}
+                            key={permission.key}
+                          >
+                            <input
+                              checked={checked}
+                              className="mt-0.5"
+                              disabled={!editing}
+                              onChange={() => togglePermission(permission.key)}
+                              type="checkbox"
+                            />
+                            <span>
+                              <span className="block text-sm font-semibold">{permission.label}</span>
+                              <span className="block text-xs text-slate-500">{permission.hint}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* A role made before this list existed, or by the API directly, can hold a permission
+                  the dashboard does not know about. Showing it keeps the screen honest, and saving
+                  the role would silently drop it otherwise. */}
+              {(() => {
+                const source = editing ? draftPermissions : (panelRole?.permissions ?? []);
+                const unknown = source.filter((key) => !ALL_PERMISSION_KEYS.includes(key));
+
+                if (unknown.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    This role also grants {unknown.join(", ")}, which this screen does not recognise.
+                    Saving will keep {unknown.length === 1 ? "it" : "them"}.
+                  </p>
+                );
+              })()}
+            </div>
+
+            {editing ? (
+              <div className="mb-8 flex flex-wrap gap-2">
+                <button
+                  className="rounded-md bg-[#0067ff] px-4 py-2 text-sm font-bold text-white hover:bg-[#0050c7] disabled:opacity-60"
+                  disabled={isSaving}
+                  onClick={() => void saveRole()}
+                  type="button"
+                >
+                  {isSaving ? "Saving..." : isCreating ? "Create role" : "Save changes"}
+                </button>
+                {isCreating ? (
+                  <button
+                    className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold hover:bg-slate-50"
+                    onClick={cancelCreating}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                ) : selected ? (
+                  <button
+                    className="rounded-md border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() => void removeRole(selected)}
+                    type="button"
+                  >
+                    Delete role
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {panelRole ? (
+              <div>
+                <h4 className="mb-1 text-sm font-bold">Who has this role</h4>
+                <p className="mb-3 text-xs text-slate-500">
+                  Changes apply straight away — the next request that teammate makes is checked
+                  against their new permissions.
+                </p>
+
+                {members.length === 0 ? (
+                  <p className="text-sm text-slate-500">No teammates yet.</p>
+                ) : (
+                  <div className="max-w-xl">
+                    {members.map((member) => {
+                      const hasRole = memberHasRole(member, panelRole);
+
+                      return (
+                        <label
+                          className="flex items-center gap-3 border-b border-slate-100 px-1 py-2.5"
+                          key={member.id}
+                        >
+                          <input
+                            checked={hasRole}
+                            disabled={busyMemberId === member.id}
+                            onChange={() => void toggleMember(member, panelRole)}
+                            type="checkbox"
+                          />
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-bold">
+                            {initials(member.displayName ?? member.name, member.email)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold">
+                              {agentLabel(member)}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">
+                              {member.roles.length ? member.roles.join(", ") : "No roles"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+    </div>
+  );
 }

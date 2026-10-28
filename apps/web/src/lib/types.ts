@@ -697,3 +697,20 @@ export interface AiPerformance {
   totalChats: number;
   periodDays: number;
 }
+
+export interface Role {
+  id: string;
+  key: string | null;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoleAssignment {
+  membershipId: string;
+  roleId: string;
+  roles: Role[];
+}
